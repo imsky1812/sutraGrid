@@ -1,0 +1,19 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.sutra.vehicle.app-mergeDebugResources-53:/values-v16/values-v16.xml",
+            "map": [
+                {
+                    "source": "C:\\Users\\Sarvesh\\.gradle\\caches\\9.0.0\\transforms\\488f71a0621ac4c886ef3b8fd395404f\\transformed\\core-1.12.0\\res\\values-v16\\values-v16.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "65",
+                        "endOffsets": "116"
+                    }
+                }
+            ]
+        }
+    ]
+}

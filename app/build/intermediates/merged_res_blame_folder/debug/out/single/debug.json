@@ -1,0 +1,10 @@
+[
+    {
+        "merged": "com.sutra.vehicle.app-merged_res-55:/xml_backup_rules.xml.flat",
+        "source": "com.sutra.vehicle.app-main-57:/xml/backup_rules.xml"
+    },
+    {
+        "merged": "com.sutra.vehicle.app-merged_res-55:/xml_data_extraction_rules.xml.flat",
+        "source": "com.sutra.vehicle.app-main-57:/xml/data_extraction_rules.xml"
+    }
+]
