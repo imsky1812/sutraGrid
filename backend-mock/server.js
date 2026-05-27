@@ -28,29 +28,64 @@ app.post('/api/auth/login', (req, res) => {
     });
 });
 
+// Active vehicles tracking map
+const activeVehicles = new Map();
+
+function printDashboard() {
+    console.clear();
+    console.log('============================= SUTRA LIVE TELEMETRY DASHBOARD =============================');
+    console.log(`Active Connections: ${activeVehicles.size}`);
+    console.log('-----------------------------------------------------------------------------------------');
+    console.log(String('Driver').padEnd(15) + ' | ' + 
+                String('Vehicle ID').padEnd(15) + ' | ' + 
+                String('Type').padEnd(10) + ' | ' + 
+                String('Status').padEnd(15) + ' | ' + 
+                String('Location').padEnd(25) + ' | ' + 
+                String('Speed').padEnd(12) + ' | ' + 
+                String('Last Updated'));
+    console.log('-----------------------------------------------------------------------------------------');
+    
+    activeVehicles.forEach((data) => {
+        const statusStr = data.isEmergency ? '!! EMERGENCY !!' : 'NORMAL';
+        const locStr = `${data.lat.toFixed(6)}, ${data.lng.toFixed(6)}`;
+        const speedStr = `${data.speed.toFixed(2)} km/h`;
+        const timeStr = new Date(data.timestamp * 1000).toLocaleTimeString();
+        
+        console.log(String(data.driverName).padEnd(15) + ' | ' + 
+                    String(data.vehicleId).padEnd(15) + ' | ' + 
+                    String(data.type).padEnd(10) + ' | ' + 
+                    String(statusStr).padEnd(15) + ' | ' + 
+                    String(locStr).padEnd(25) + ' | ' + 
+                    String(speedStr).padEnd(12) + ' | ' + 
+                    timeStr);
+    });
+    console.log('=========================================================================================');
+}
+
 // WebSocket for Live Telemetry
 wss.on('connection', (ws) => {
     console.log('Vehicle Connected to Stream');
+    let clientVehicleId = null;
 
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message);
-            console.clear();
-            console.log('=== SUTRA LIVE TELEMETRY DASHBOARD ===');
-            console.log(`Driver:    ${data.driverName}`);
-            console.log(`Vehicle:   ${data.vehicleId} [${data.type}]`);
-            console.log(`Status:    ${data.isEmergency ? '!! EMERGENCY !!' : 'NORMAL'}`);
-            console.log(`Location:  ${data.lat.toFixed(6)}, ${data.lng.toFixed(6)}`);
-            console.log(`Speed:     ${data.speed.toFixed(2)} km/h`);
-            console.log(`Time:      ${new Date(data.timestamp * 1000).toLocaleTimeString()}`);
-            console.log('=======================================');
+            clientVehicleId = data.vehicleId;
+            ws.vehicleId = data.vehicleId;
+            
+            activeVehicles.set(data.vehicleId, data);
+            printDashboard();
         } catch (e) {
             console.log('Received raw message:', message.toString());
         }
     });
 
     ws.on('close', () => {
-        console.log('Vehicle Disconnected');
+        console.log(`Vehicle ${clientVehicleId || ''} Disconnected`);
+        if (clientVehicleId) {
+            activeVehicles.delete(clientVehicleId);
+            printDashboard();
+        }
     });
 });
 

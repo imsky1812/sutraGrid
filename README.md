@@ -30,12 +30,28 @@ Due to environmental constraints, this raw code needs to be compiled via an IDE 
 ---
 
 ## How Data Flows to the Backend
-1. **Login State**: Standard REST POST (`/api/auth/login`) sends initial metadata (`VehicleAuthPayload` in `com.sutra.vehicle.data.VehicleData.kt`).
+1. **Login State**: Standard REST POST (`/api/auth/login`) sends initial metadata (`VehicleAuthPayload` in [VehicleData.kt](file:///d:/PROjects/sutraGrid/app/src/main/java/com/sutra/vehicle/data/VehicleData.kt)).
 2. **WebSocket Activation**: 
-   * Upon successful login, the app transitions to `DashboardScreen` and spins up the Android `ForegroundService` (`TelemetryService.kt`).
+   * Upon successful login, the app transitions to [DashboardScreen.kt](file:///d:/PROjects/sutraGrid/app/src/main/java/com/sutra/vehicle/ui/DashboardScreen.kt) and spins up the Android `ForegroundService` ([TelemetryService.kt](file:///d:/PROjects/sutraGrid/app/src/main/java/com/sutra/vehicle/service/TelemetryService.kt)).
    * A persistent OkHttp `WebSocket` tunnel opens to `ws://server_ip:3000/vehicle/stream`.
 3. **Telemetry Push**: 
    * The `FusedLocationProviderClient` grabs device coordinates every `1000ms`. 
-   * A `VehicleUpdatePayload` JSON string is instantly packaged and written to the active socket hook in `sendTelemetry()`.
+   * A `VehicleUpdatePayload` JSON string is instantly packaged and written to the active socket hook in [sendTelemetry()](file:///d:/PROjects/sutraGrid/app/src/main/java/com/sutra/vehicle/service/TelemetryService.kt#L115).
 
-> **Note**: To configure this for production, edit the `BASE_URL` and `WS_URL` variables in `app/src/main/java/com/sutra/vehicle/network/ApiClient.kt` to match your cloud dashboard server IP.
+```mermaid
+sequenceDiagram
+    participant App as Android Client (App)
+    participant Server as Mock Backend (Node.js)
+
+    App->>Server: POST /api/auth/login (Driver Info)
+    Server-->>App: JSON { success: true, token: "mock-jwt-token-..." }
+    Note over App: Start Foreground Telemetry Service
+    App->>Server: WebSocket Upgrade: ws://[IP]:3000/vehicle/stream
+    Server-->>App: WebSocket Connection Established
+    loop Every 1 second (Normal) / 500ms (Emergency)
+        App->>Server: Send JSON Telemetry Update (Lat, Lng, Speed, Bearing)
+        Note over Server: Logs live data to terminal console
+    end
+```
+
+> **Note**: To configure this for production, edit the `BASE_URL` and `WS_URL` variables in [ApiClient.kt](file:///d:/PROjects/sutraGrid/app/src/main/java/com/sutra/vehicle/network/ApiClient.kt) to match your cloud dashboard server IP.
