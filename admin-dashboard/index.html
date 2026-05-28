@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SUTRA Central Control Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- Upper Header -->
+    <header class="glass-panel">
+        <div class="logo-section">
+            <h1>SUTRA TRAFFIC CONTROL</h1>
+            <p>Real-Time Smart Traffic System Dashboard</p>
+        </div>
+
+        <nav class="nav-tabs">
+            <button class="tab-btn active" onclick="switchTab('map-tab')">Live Traffic Map</button>
+            <button class="tab-btn" onclick="switchTab('emergency-tab')">Emergency Corridor</button>
+            <button class="tab-btn" onclick="switchTab('violations-tab')">Rule Violations</button>
+            <button class="tab-btn" onclick="switchTab('simulator-tab')">Control Simulator</button>
+        </nav>
+
+        <div class="connection-status">
+            <div id="status-dot" class="status-dot"></div>
+            <span id="status-text">DISCONNECTED</span>
+        </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main>
+
+        <!-- Dynamic Overlay for Critical Emergency Alerts -->
+        <div id="emergency-banner" class="alert-overlay-banner">
+            <span class="alert-icon-pulse">🚨</span>
+            <div class="alert-message-content">
+                <h4 id="emergency-banner-title">EMERGENCY VEHICLE APPROACHING</h4>
+                <p id="emergency-banner-text">Vehicle ID: MH-12-EX-4321 has requested green corridor routing.</p>
+            </div>
+            <button class="alert-close-btn" onclick="dismissEmergencyBanner()">Acknowledge</button>
+        </div>
+
+        <!-- 1. LIVE TRAFFIC MAP TAB -->
+        <div id="map-tab" class="tab-content active">
+            <!-- Left Side Panel: Connected Vehicles -->
+            <div class="side-panel glass-panel">
+                <div class="panel-header">
+                    <h2>Active Vehicles</h2>
+                    <span id="vehicle-count" class="connection-status">0 Active</span>
+                </div>
+                <div id="vehicle-list" class="list-container">
+                    <p class="text-secondary" style="text-align: center; padding: 20px;">No vehicles online. Start the APK client to stream telemetry.</p>
+                </div>
+            </div>
+
+            <!-- Right Panel: Google Map -->
+            <div class="map-panel glass-panel">
+                <div class="map-container">
+                    <div id="map"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. EMERGENCY CORRIDOR TAB -->
+        <div id="emergency-tab" class="tab-content">
+            <div class="side-panel glass-panel">
+                <div class="panel-header">
+                    <h2>Emergency Status</h2>
+                </div>
+                <div class="list-container" style="padding: 16px; gap: 16px;">
+                    <div style="background: rgba(255,77,90,0.1); border: 1px solid var(--red-neon); padding: 12px; border-radius: 6px;">
+                        <h3 style="color: var(--red-neon); font-family: 'Orbitron'; font-size: 14px; margin-bottom: 6px;">Green Corridor Routing</h3>
+                        <p style="font-size: 12px; line-height: 1.4; color: var(--text-secondary);">When an emergency vehicle broadcasts a clear-path request, surrounding lanes are dynamically alerted. The dashboard displays the optimal routes below.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Active Emergency Dispatch</label>
+                        <div id="emergency-dispatch-details" style="font-size: 13px; padding: 10px; border-radius: 6px; background: rgba(0,0,0,0.2);">
+                            <span class="text-secondary">No active emergency vehicle broadcasts.</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="map-panel glass-panel">
+                <div class="panel-header">
+                    <h2>Nearest Emergency Dispatch Hubs</h2>
+                </div>
+                <div class="logs-panel">
+                    <div id="emergency-hubs-list" class="logs-container">
+                        <!-- Dispatch hubs will be printed here -->
+                        <p class="text-secondary" style="text-align: center; padding: 20px;">Waiting for emergency telemetry stream...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. RULE VIOLATIONS TAB -->
+        <div id="violations-tab" class="tab-content">
+            <div class="side-panel glass-panel">
+                <div class="panel-header">
+                    <h2>Traffic Rule Center</h2>
+                </div>
+                <div class="list-container" style="padding: 16px; gap: 16px;">
+                    <div style="background: rgba(0,242,254,0.05); border: 1px solid var(--border-color); padding: 12px; border-radius: 6px;">
+                        <h3 style="color: var(--cyan-neon); font-family: 'Orbitron'; font-size: 14px; margin-bottom: 6px;">Global Speed Limits</h3>
+                        <p style="font-size: 12px; line-height: 1.4; color: var(--text-secondary);">Vehicle speed limit: <strong>80 km/h</strong>.<br>Speeding violations automatically log details and dispatch reports to the Traffic Police Department mock API.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Violation Statistics</label>
+                        <div style="display: flex; gap: 10px; margin-top: 8px;">
+                            <div style="flex: 1; padding: 12px; border-radius: 6px; background: rgba(255,77,90,0.1); border: 1px solid rgba(255,77,90,0.2); text-align: center;">
+                                <div id="speeding-count-stat" style="font-family: 'Orbitron'; font-size: 24px; font-weight: bold; color: var(--red-neon);">0</div>
+                                <div style="font-size: 10px; color: var(--text-secondary); margin-top: 4px;">SPEED VIOLATIONS</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="map-panel glass-panel">
+                <div class="panel-header">
+                    <h2>Violation Logs & Police Dispatch API Status</h2>
+                </div>
+                <div class="logs-panel">
+                    <div id="violation-logs" class="logs-container">
+                        <p class="text-secondary" style="text-align: center; padding: 20px;">No rule violations recorded in this session.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. CONTROL SIMULATOR TAB -->
+        <div id="simulator-tab" class="tab-content">
+            <div class="side-panel glass-panel">
+                <div class="panel-header">
+                    <h2>Mock Client Simulator</h2>
+                </div>
+                <div class="sim-controls-panel">
+                    <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.4;">Use this form to simulate a vehicle directly from the dashboard. This transmits simulated telemetry over the WebSocket server.</p>
+
+                    <div class="form-group">
+                        <label for="sim-vehicle-id">Vehicle ID / Number</label>
+                        <input type="text" id="sim-vehicle-id" value="KA-03-EM-8899">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="sim-driver-name">Driver Name</label>
+                        <input type="text" id="sim-driver-name" value="Amit Sharma">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="sim-vehicle-type">Vehicle Type</label>
+                        <select id="sim-vehicle-type" onchange="toggleSimType()">
+                            <option value="NORMAL">Normal Vehicle</option>
+                            <option value="AMBULANCE">Ambulance (Emergency)</option>
+                            <option value="POLICE">Police Cruiser (Emergency)</option>
+                            <option value="FIRE">Fire Engine (Emergency)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="sim-speed">Speed (km/h)</label>
+                        <input type="number" id="sim-speed" value="65" min="0" max="150">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="sim-alert-message">Alert Message (Emergency)</label>
+                        <input type="text" id="sim-alert-message" value="CLEAR PATH IMMEDIATELY - TRANSIT UNDERWAY" disabled>
+                    </div>
+
+                    <button id="sim-start-btn" class="btn btn-active" style="width: 100%; margin-top: 10px;" onclick="toggleSimulatorEngine()">Start Browser Simulation</button>
+                </div>
+            </div>
+
+            <div class="map-panel glass-panel">
+                <div class="panel-header">
+                    <h2>Simulation Path Coordinates</h2>
+                </div>
+                <div class="list-container" style="padding: 16px;">
+                    <p style="font-size: 13px; line-height: 1.5; color: var(--text-secondary); margin-bottom: 16px;">
+                        The browser simulator runs along a mock path near Cubbon Park, Bangalore. You can manually adjust the telemetry speed in the left panel while the simulation is running to trigger **Speed Violations** (> 80 km/h) or toggle emergency types to test the **Green Corridor Alert Overlay** on the map.
+                    </p>
+                    <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); padding: 12px; border-radius: 6px; font-family: monospace; font-size: 12px; height: 180px; overflow-y: auto;" id="sim-coordinate-display">
+                        [SIMULATION INACTIVE]
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Google Maps Javascript Library -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDC9YJNsiUPhy37ppPMDjEJg14W5iYRSKY&libraries=geometry&callback=initMap" async defer></script>
+    <script src="app.js"></script>
+</body>
+</html>

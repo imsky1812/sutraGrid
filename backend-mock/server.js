@@ -64,8 +64,19 @@ function printDashboard() {
 
 // WebSocket for Live Telemetry
 wss.on('connection', (ws) => {
-    console.log('Vehicle Connected to Stream');
+    console.log('New Client Connected to Stream');
     let clientVehicleId = null;
+
+    // Immediately push existing active vehicles to new dashboard connections
+    if (activeVehicles.size > 0) {
+        activeVehicles.forEach((vehicleData) => {
+            try {
+                ws.send(JSON.stringify({ type: 'UPDATE', data: vehicleData }));
+            } catch (e) {
+                // Ignore
+            }
+        });
+    }
 
     ws.on('message', (message) => {
         try {
@@ -75,6 +86,14 @@ wss.on('connection', (ws) => {
             
             activeVehicles.set(data.vehicleId, data);
             printDashboard();
+
+            // Broadcast updates to all other clients (dashboards)
+            const broadcastPayload = JSON.stringify({ type: 'UPDATE', data: data });
+            wss.clients.forEach((client) => {
+                if (client !== ws && client.readyState === WebSocket.OPEN) {
+                    client.send(broadcastPayload);
+                }
+            });
         } catch (e) {
             console.log('Received raw message:', message.toString());
         }
@@ -85,6 +104,14 @@ wss.on('connection', (ws) => {
         if (clientVehicleId) {
             activeVehicles.delete(clientVehicleId);
             printDashboard();
+
+            // Broadcast disconnect event to all other clients
+            const broadcastPayload = JSON.stringify({ type: 'DISCONNECT', vehicleId: clientVehicleId });
+            wss.clients.forEach((client) => {
+                if (client !== ws && client.readyState === WebSocket.OPEN) {
+                    client.send(broadcastPayload);
+                }
+            });
         }
     });
 });

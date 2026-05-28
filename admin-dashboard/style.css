@@ -1,0 +1,502 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@500;700;900&display=swap');
+
+:root {
+    --bg-primary: #060913;
+    --bg-secondary: rgba(13, 20, 38, 0.65);
+    --border-color: rgba(0, 242, 254, 0.18);
+    --border-hover: rgba(0, 242, 254, 0.45);
+    --text-primary: #f3f4f6;
+    --text-secondary: #9ca3af;
+    
+    /* Neon Glow Palettes */
+    --cyan-neon: #00f2fe;
+    --cyan-glow: rgba(0, 242, 254, 0.35);
+    --red-neon: #ff4d5a;
+    --red-glow: rgba(255, 77, 90, 0.35);
+    --orange-neon: #ffa502;
+    --orange-glow: rgba(255, 165, 2, 0.35);
+    --green-neon: #2ed573;
+    --green-glow: rgba(46, 213, 115, 0.35);
+    
+    --card-padding: 20px;
+    --transition-speed: 0.3s;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: var(--bg-primary);
+    background-image: 
+        radial-gradient(at 0% 0%, rgba(0, 242, 254, 0.05) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(255, 77, 90, 0.05) 0px, transparent 50%);
+    color: var(--text-primary);
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Glassmorphic Container Utility */
+.glass-panel {
+    background: var(--bg-secondary);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+    transition: border-color var(--transition-speed);
+}
+
+.glass-panel:hover {
+    border-color: var(--border-hover);
+}
+
+/* Header Component */
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border-color);
+    background: rgba(6, 9, 19, 0.85);
+    backdrop-filter: blur(8px);
+}
+
+.logo-section h1 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 22px;
+    font-weight: 900;
+    letter-spacing: 2px;
+    background: linear-gradient(90deg, #00f2fe, #4facfe);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: 0 0 15px rgba(0, 242, 254, 0.2);
+}
+
+.logo-section p {
+    font-size: 11px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* Connection Badge */
+.connection-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 12px;
+    padding: 6px 12px;
+    border-radius: 20px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--red-neon);
+    box-shadow: 0 0 8px var(--red-neon);
+}
+
+.status-dot.connected {
+    background-color: var(--green-neon);
+    box-shadow: 0 0 8px var(--green-neon);
+}
+
+/* Navigation Tabs */
+.nav-tabs {
+    display: flex;
+    gap: 8px;
+}
+
+.tab-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    padding: 8px 16px;
+    cursor: pointer;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 12px;
+    border-radius: 6px;
+    transition: all var(--transition-speed);
+}
+
+.tab-btn:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.tab-btn.active {
+    color: var(--cyan-neon);
+    background: rgba(0, 242, 254, 0.1);
+    border: 1px solid var(--border-hover);
+    box-shadow: 0 0 10px rgba(0, 242, 254, 0.1);
+}
+
+/* Main Layout Grid */
+main {
+    display: flex;
+    flex: 1;
+    padding: 20px;
+    gap: 20px;
+    overflow: hidden;
+}
+
+.tab-content {
+    display: none;
+    width: 100%;
+    height: 100%;
+    gap: 20px;
+}
+
+.tab-content.active {
+    display: flex;
+}
+
+/* Left panel for monitoring */
+.side-panel {
+    flex: 0 0 380px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* Central Map Panel */
+.map-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.map-container {
+    flex: 1;
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+    border: 1px solid var(--border-color);
+}
+
+#map {
+    width: 100%;
+    height: 100%;
+}
+
+/* Active Vehicles List styling */
+.panel-header {
+    padding: 16px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.panel-header h2 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 16px;
+    letter-spacing: 1px;
+}
+
+.list-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* Scrollbar Customization */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.1);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--border-hover);
+}
+
+/* Vehicle List Item Card */
+.vehicle-card {
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.vehicle-card.emergency {
+    border-left: 3px solid var(--red-neon);
+}
+
+.vehicle-card.normal {
+    border-left: 3px solid var(--green-neon);
+}
+
+.vehicle-card.active-selected {
+    background: rgba(0, 242, 254, 0.05);
+    border-color: var(--cyan-neon);
+}
+
+.card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.vehicle-title {
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.vehicle-type-tag {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
+    padding: 3px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.vehicle-type-tag.emergency-tag {
+    color: var(--red-neon);
+    background: rgba(255, 77, 90, 0.1);
+    border: 1px solid rgba(255, 77, 90, 0.2);
+}
+
+.card-details {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.stat-value {
+    font-family: 'Orbitron', sans-serif;
+    color: var(--text-primary);
+    font-weight: bold;
+}
+
+.stat-value.speeding {
+    color: var(--red-neon);
+    text-shadow: 0 0 5px var(--red-glow);
+}
+
+/* Critical Congestion Banner Overlay */
+.alert-overlay-banner {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    right: 20px;
+    z-index: 1000;
+    padding: 16px;
+    border-radius: 8px;
+    background: rgba(255, 77, 90, 0.95);
+    box-shadow: 0 0 20px var(--red-glow);
+    display: none;
+    align-items: center;
+    gap: 16px;
+    border: 1px solid #ff4d5a;
+    animation: flash 1.5s infinite;
+}
+
+@keyframes flash {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.8; }
+}
+
+.alert-overlay-banner.show {
+    display: flex;
+}
+
+.alert-icon-pulse {
+    font-size: 24px;
+    animation: pulse 1s infinite alternate;
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    100% { transform: scale(1.2); }
+}
+
+.alert-message-content {
+    flex: 1;
+}
+
+.alert-message-content h4 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 2px;
+}
+
+.alert-message-content p {
+    font-size: 12px;
+}
+
+.alert-close-btn {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    color: white;
+    padding: 4px 8px;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 11px;
+}
+
+/* Logging Panels (Rule Violations / System Logs) */
+.logs-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.logs-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.log-item {
+    padding: 12px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.02);
+    border-left: 3px solid rgba(255, 255, 255, 0.1);
+    font-size: 13px;
+    line-height: 1.4;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+.log-item.speed-violation {
+    border-left-color: var(--red-neon);
+    background: rgba(255, 77, 90, 0.03);
+}
+
+.log-item.emergency-alert {
+    border-left-color: var(--orange-neon);
+    background: rgba(255, 165, 2, 0.03);
+}
+
+.log-item.system-info {
+    border-left-color: var(--cyan-neon);
+    background: rgba(0, 242, 254, 0.03);
+}
+
+.log-time {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.police-dispatch-badge {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 9px;
+    color: var(--cyan-neon);
+    border: 1px solid var(--border-hover);
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(0, 242, 254, 0.05);
+}
+
+/* Simulation Control Widgets */
+.sim-controls-panel {
+    padding: 16px;
+}
+
+.sim-btn-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.btn {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    padding: 10px 16px;
+    border-radius: 6px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 11px;
+    font-weight: bold;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: all var(--transition-speed);
+}
+
+.btn:hover {
+    background: rgba(0, 242, 254, 0.15);
+    border-color: var(--cyan-neon);
+}
+
+.btn.btn-emergency {
+    border-color: rgba(255, 77, 90, 0.3);
+}
+
+.btn.btn-emergency:hover {
+    background: rgba(255, 77, 90, 0.2);
+    border-color: var(--red-neon);
+    box-shadow: 0 0 10px rgba(255, 77, 90, 0.2);
+}
+
+.btn.btn-active {
+    background: var(--cyan-neon);
+    color: #060913;
+    border-color: var(--cyan-neon);
+}
+
+/* Form inputs styling */
+.form-group {
+    margin-bottom: 12px;
+}
+
+.form-group label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    display: block;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.form-group input, .form-group select {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    outline: none;
+    transition: border-color var(--transition-speed);
+}
+
+.form-group input:focus, .form-group select:focus {
+    border-color: var(--cyan-neon);
+}
