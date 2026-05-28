@@ -500,3 +500,22 @@ main {
 .form-group input:focus, .form-group select:focus {
     border-color: var(--cyan-neon);
 }
+
+/* Analytics gauges & HTML charts */
+.analytics-gauge {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.gauge-bar-bg {
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+#avg-speed-bar {
+    box-shadow: 0 0 10px var(--cyan-glow);
+}
+
+#latency-bar {
+    box-shadow: 0 0 10px var(--green-glow);
+}

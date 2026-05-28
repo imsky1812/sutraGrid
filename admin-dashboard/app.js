@@ -1,6 +1,8 @@
 let map;
 const vehicleMarkers = new Map();
 const routePolylines = new Map();
+const bypassPolylines = new Map();
+const congestionCircles = new Map();
 const serviceMarkers = [];
 let wsConnection;
 
@@ -10,6 +12,7 @@ let speedingViolationsCount = 0;
 let simulationInterval = null;
 let simIndex = 0;
 let isSimulating = false;
+let isGlobalOptimizerActive = false;
 
 // Predefined Dark Theme Styles for Google Maps
 const darkMapStyle = [
@@ -129,6 +132,7 @@ function handleTelemetryMessage(payload) {
         
         updateVehicleOnMap(vehicle);
         updateVehicleList();
+        updateSystemAnalytics();
         
         // Rules Check: Speeding limit = 80 km/h
         if (vehicle.speed > 80) {
@@ -145,6 +149,7 @@ function handleTelemetryMessage(payload) {
         removeVehicleFromMap(vehicleId);
         activeVehicles.delete(vehicleId);
         updateVehicleList();
+        updateSystemAnalytics();
         logSystemMessage(`Vehicle ${vehicleId} disconnected from network.`);
     }
 }
@@ -227,6 +232,68 @@ function updateVehicleOnMap(vehicle) {
             routePolylines.delete(vehicle.vehicleId);
         }
     }
+
+    // 3. Dynamic Congestion Zone Circle (Speed < 15 km/h for normal vehicles)
+    if (!vehicle.isEmergency && vehicle.speed < 15 && vehicle.speed > 0) {
+        if (congestionCircles.has(vehicle.vehicleId)) {
+            const circle = congestionCircles.get(vehicle.vehicleId);
+            circle.setCenter(position);
+        } else {
+            const circle = new google.maps.Circle({
+                strokeColor: "#ff4d5a",
+                strokeOpacity: 0.5,
+                strokeWeight: 1,
+                fillColor: "#ff4d5a",
+                fillOpacity: 0.25,
+                map: map,
+                center: position,
+                radius: 200 // 200 meters
+            });
+            congestionCircles.set(vehicle.vehicleId, circle);
+            logSystemMessage(`⚠️ Traffic Bottleneck detected at ${position.lat.toFixed(5)}, ${position.lng.toFixed(5)} (Speed: ${vehicle.speed.toFixed(1)} km/h)`);
+        }
+    } else {
+        // Clear congestion zone if speed increases or vehicle is emergency
+        if (congestionCircles.has(vehicle.vehicleId)) {
+            congestionCircles.get(vehicle.vehicleId).setMap(null);
+            congestionCircles.delete(vehicle.vehicleId);
+        }
+    }
+
+    // 4. Global bypass polyline route (if Global Traffic Flow Optimizer is active)
+    if (isGlobalOptimizerActive && vehicle.destinationLat && vehicle.destinationLng) {
+        // Create an alternative route offset from the direct path to mock congestion bypass
+        const bypassCoordinates = [
+            position,
+            { lat: (position.lat + vehicle.destinationLat) / 2 + 0.002, lng: (position.lng + vehicle.destinationLng) / 2 - 0.002 },
+            { lat: vehicle.destinationLat, lng: vehicle.destinationLng }
+        ];
+
+        if (bypassPolylines.has(vehicle.vehicleId)) {
+            const polyline = bypassPolylines.get(vehicle.vehicleId);
+            polyline.setPath(bypassCoordinates);
+        } else {
+            const polyline = new google.maps.Polyline({
+                path: bypassCoordinates,
+                geodesic: true,
+                strokeColor: "#ffa502",
+                strokeOpacity: 0.7,
+                strokeWeight: 4,
+                icons: [{
+                    icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 },
+                    offset: '0',
+                    repeat: '20px'
+                }],
+                map: map
+            });
+            bypassPolylines.set(vehicle.vehicleId, polyline);
+        }
+    } else {
+        if (bypassPolylines.has(vehicle.vehicleId)) {
+            bypassPolylines.get(vehicle.vehicleId).setMap(null);
+            bypassPolylines.delete(vehicle.vehicleId);
+        }
+    }
 }
 
 // Remove Vehicle from Map
@@ -238,6 +305,14 @@ function removeVehicleFromMap(vehicleId) {
     if (routePolylines.has(vehicleId)) {
         routePolylines.get(vehicleId).setMap(null);
         routePolylines.delete(vehicleId);
+    }
+    if (congestionCircles.has(vehicleId)) {
+        congestionCircles.get(vehicleId).setMap(null);
+        congestionCircles.delete(vehicleId);
+    }
+    if (bypassPolylines.has(vehicleId)) {
+        bypassPolylines.get(vehicleId).setMap(null);
+        bypassPolylines.delete(vehicleId);
     }
 }
 
@@ -313,16 +388,69 @@ function updateConnectionUI(connected, text) {
     textEl.innerText = text;
 }
 
-// Rules Log Engine
+// System analytics custom HTML/CSS gauge updater
+function updateSystemAnalytics() {
+    if (activeVehicles.size === 0) {
+        document.getElementById("avg-speed-value").innerText = "0 km/h";
+        document.getElementById("avg-speed-bar").style.width = "0%";
+        return;
+    }
+    
+    let totalSpeed = 0;
+    activeVehicles.forEach((v) => {
+        totalSpeed += v.speed;
+    });
+    const avgSpeed = totalSpeed / activeVehicles.size;
+    
+    document.getElementById("avg-speed-value").innerText = `${avgSpeed.toFixed(1)} km/h`;
+    
+    // Cap average speed display bar at 120 km/h for gauge logic
+    const pct = Math.min((avgSpeed / 120) * 100, 100);
+    document.getElementById("avg-speed-bar").style.width = `${pct}%`;
+    
+    // Dynamic connection latency based on vehicle count
+    const latencyBar = document.getElementById("latency-bar");
+    const latencyValue = document.getElementById("latency-value");
+    if (activeVehicles.size > 3) {
+        latencyBar.style.backgroundColor = "var(--orange-neon)";
+        latencyBar.style.width = "75%";
+        latencyValue.innerText = "78% Loaded (Heavy Flow)";
+    } else {
+        latencyBar.style.backgroundColor = "var(--green-neon)";
+        latencyBar.style.width = "98%";
+        latencyValue.innerText = "98% Optimal (Normal Load)";
+    }
+}
+
+// Toggle Global Traffic Flow Optimizer
+function toggleGlobalOptimizer() {
+    const btn = document.getElementById("optimizer-btn");
+    isGlobalOptimizerActive = !isGlobalOptimizerActive;
+    
+    if (isGlobalOptimizerActive) {
+        btn.innerText = "Disable Global Flow Optimization";
+        btn.classList.add("btn-active");
+        logSystemMessage("Global Traffic Routing Optimizer activated. Rerouting active fleets.");
+    } else {
+        btn.innerText = "Optimize Global Flow";
+        btn.classList.remove("btn-active");
+        logSystemMessage("Global Routing Optimizer disabled. Restoring default routes.");
+    }
+    
+    // Force redraw on map
+    activeVehicles.forEach((vehicle) => {
+        updateVehicleOnMap(vehicle);
+    });
+}
+
+// Rules Log Engine & Police Dispatch API Log
 function logSpeedViolation(vehicle) {
     const logsEl = document.getElementById("violation-logs");
     
-    // Check if log container has the empty text, if so clear it
     if (logsEl.querySelector(".text-secondary")) {
         logsEl.innerHTML = "";
     }
     
-    // Increment stats count
     speedingViolationsCount++;
     document.getElementById("speeding-count-stat").innerText = speedingViolationsCount;
     
@@ -343,6 +471,41 @@ function logSpeedViolation(vehicle) {
     `;
     
     logsEl.insertAdjacentHTML("afterbegin", logHTML);
+
+    // Generate detailed mock JSON payload response from Police Department dispatch API
+    const ticketId = "TK-" + Math.floor(100000 + Math.random() * 900000);
+    const officerList = ["Inspector S. Patel", "Sergeant A. Rawat", "Officer K. Rao", "Inspector M. Kumar"];
+    const patrolUnits = ["Patrol Unit Sector 4", "Interceptor Vehicle 12", "Highway Patrol Alpha", "City Command Unit 2"];
+    
+    const apiResponse = {
+        status: "VIOLATION_RECORDED",
+        api_endpoint: "https://api.trafficpolice.gov.in/v1/violations/dispatch",
+        timestamp: new Date().toISOString(),
+        dispatched: true,
+        incident_data: {
+            ticket_number: ticketId,
+            vehicle_number: vehicle.vehicleId,
+            driver: vehicle.driverName,
+            offense: "SPEED_LIMIT_EXCEEDED",
+            speed_recorded: `${vehicle.speed.toFixed(1)} km/h`,
+            speed_limit: "80.0 km/h",
+            location: {
+                latitude: vehicle.lat,
+                longitude: vehicle.lng
+            }
+        },
+        responder_dispatch: {
+            unit_name: patrolUnits[Math.floor(Math.random() * patrolUnits.length)],
+            assigned_officer: officerList[Math.floor(Math.random() * officerList.length)],
+            dispatch_eta: "6-8 mins",
+            command: "INTERCEPT_AND_ISSUE_TICKET"
+        }
+    };
+
+    const feedEl = document.getElementById("police-api-feed");
+    if (feedEl) {
+        feedEl.innerText = JSON.stringify(apiResponse, null, 2);
+    }
 }
 
 // Emergency Banner & Alerts
@@ -356,6 +519,7 @@ function triggerEmergencyBanner(vehicle) {
     banner.classList.add("show");
 }
 
+// Dismiss alert banner
 function dismissEmergencyBanner() {
     document.getElementById("emergency-banner").classList.remove("show");
 }
