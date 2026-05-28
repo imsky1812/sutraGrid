@@ -47,10 +47,10 @@ class TelemetryService : Service() {
     
     // Auto-reconnect configs with exponential backoff
     private var reconnectDelay = 2000L
-    private const val MAX_RECONNECT_DELAY = 30000L
     private var isClosedIntentionally = false
 
     companion object {
+        private const val MAX_RECONNECT_DELAY = 30000L
         var viewModel: DashboardViewModel? = null
 
         var destinationLat: Double? = null
