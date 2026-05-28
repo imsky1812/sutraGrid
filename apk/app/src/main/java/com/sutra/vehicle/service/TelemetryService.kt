@@ -6,7 +6,6 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.location.Location
 import android.os.Build
 import android.os.IBinder
 import android.os.Handler
@@ -20,6 +19,7 @@ import com.sutra.vehicle.data.VehicleUpdatePayload
 import com.sutra.vehicle.db.LocationDbHelper
 import com.sutra.vehicle.network.ApiClient
 import com.sutra.vehicle.ui.DashboardViewModel
+import kotlinx.coroutines.*
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okhttp3.Response
@@ -32,6 +32,9 @@ class TelemetryService : Service() {
     private var webSocket: WebSocket? = null
     private val gson = Gson()
     private val mainHandler = Handler(Looper.getMainLooper())
+    
+    // Asynchronous background coroutines scope
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private var vehicleId: String = ""
     private var driverName: String = ""
@@ -41,6 +44,11 @@ class TelemetryService : Service() {
     private var isSimulating: Boolean = false
     private var simulationIndex = 0
     private var simulationPoints = listOf<LatLng>()
+    
+    // Auto-reconnect configs with exponential backoff
+    private var reconnectDelay = 2000L
+    private const val MAX_RECONNECT_DELAY = 30000L
+    private var isClosedIntentionally = false
 
     companion object {
         var viewModel: DashboardViewModel? = null
@@ -51,7 +59,7 @@ class TelemetryService : Service() {
         var alertMessage: String? = null
         var isRecording: Boolean = false
 
-        // Bangalore loop preset route for presentation
+        // Bangalore loop preset route
         val PRESET_ROUTE = listOf(
             LatLng(12.9716, 77.5946),
             LatLng(12.9725, 77.5950),
@@ -72,6 +80,11 @@ class TelemetryService : Service() {
             LatLng(12.9702, 77.5952),
             LatLng(12.9708, 77.5945)
         )
+    }
+
+    private val reconnectRunnable = Runnable {
+        Log.d("TelemetryService", "Attempting auto-reconnect...")
+        connectWebSocket()
     }
 
     private val simulationRunnable = object : Runnable {
@@ -105,12 +118,15 @@ class TelemetryService : Service() {
                 driverName = intent.getStringExtra("DRIVER_NAME") ?: ""
                 vehicleType = intent.getStringExtra("VEHICLE_TYPE") ?: ""
                 isEmergency = intent.getBooleanExtra("IS_EMERGENCY", false)
+                isClosedIntentionally = false
 
                 startForeground(1, createNotification())
                 connectWebSocket()
                 startLocationUpdates()
             }
             "STOP_SERVICE" -> {
+                isClosedIntentionally = true
+                mainHandler.removeCallbacks(reconnectRunnable)
                 stopLocationUpdates()
                 stopSimulation()
                 webSocket?.close(1000, "User logged out")
@@ -132,27 +148,52 @@ class TelemetryService : Service() {
         val listener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.d("TelemetryService", "WebSocket Connected")
+                reconnectDelay = 2000L // Reset backoff delay on successful connection
             }
+
             override fun onMessage(webSocket: WebSocket, text: String) {
-                // Handle commands from server if needed
+                // Command routing if required
             }
+
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e("TelemetryService", "WebSocket Error", t)
+                Log.e("TelemetryService", "WebSocket Error: ${t.message}")
+                scheduleReconnect()
+            }
+
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                Log.d("TelemetryService", "WebSocket Closed: $reason")
+                if (!isClosedIntentionally) {
+                    scheduleReconnect()
+                }
             }
         }
         webSocket = ApiClient.createWebSocket(listener)
     }
 
+    private fun scheduleReconnect() {
+        mainHandler.removeCallbacks(reconnectRunnable)
+        if (isClosedIntentionally) return
+        
+        Log.d("TelemetryService", "Scheduling reconnect in $reconnectDelay ms")
+        mainHandler.postDelayed(reconnectRunnable, reconnectDelay)
+        // Exponential backoff
+        reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY)
+    }
+
     private fun startLocationUpdates() {
-        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 2000)
+        // Battery Optimization: Emergency gets high frequency/high accuracy, normal is balanced and slower
+        val interval = if (isEmergency) 1000L else 3000L
+        val priority = if (isEmergency) Priority.PRIORITY_HIGH_ACCURACY else Priority.PRIORITY_BALANCED_POWER_ACCURACY
+
+        val locationRequest = LocationRequest.Builder(priority, interval)
             .setWaitForAccurateLocation(false)
-            .setMinUpdateIntervalMillis(1000)
-            .setMaxUpdateDelayMillis(2000)
+            .setMinUpdateIntervalMillis(interval)
+            .setMaxUpdateDelayMillis(interval * 2)
             .build()
 
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(locationResult: LocationResult) {
-                if (isSimulating) return // Skip real location when simulating
+                if (isSimulating) return
                 for (location in locationResult.locations) {
                     sendTelemetry(
                         location.latitude,
@@ -170,8 +211,9 @@ class TelemetryService : Service() {
                 locationCallback,
                 Looper.getMainLooper()
             )
+            Log.d("TelemetryService", "Location updates started. Priority: $priority, Interval: $interval ms")
         } catch (e: SecurityException) {
-            // Handled by UI
+            Log.e("TelemetryService", "Location permission missing during requestLocationUpdates")
         }
     }
 
@@ -182,7 +224,17 @@ class TelemetryService : Service() {
 
         simulationPoints = when (mode) {
             "ROUTE" -> viewModel?.directionsRoute ?: PRESET_ROUTE
-            "HISTORY" -> dbHelper.getAllHistory().map { LatLng(it.lat, it.lng) }
+            "HISTORY" -> {
+                // Run SQLite read query in background thread
+                var points = listOf<LatLng>()
+                runBlocking {
+                    val job = serviceScope.async {
+                        dbHelper.getAllHistory().map { LatLng(it.lat, it.lng) }
+                    }
+                    points = job.await()
+                }
+                points
+            }
             else -> PRESET_ROUTE
         }
 
@@ -215,15 +267,18 @@ class TelemetryService : Service() {
             alertMessage = alertMessage
         )
 
+        // Asynchronous Database Log to preserve UI frame rates
         if (isRecording) {
-            dbHelper.insertLocation(payload)
+            serviceScope.launch {
+                dbHelper.insertLocation(payload)
+            }
         }
 
         val jsonString = gson.toJson(payload)
         webSocket?.send(jsonString)
         Log.d("TelemetryService", "Sent: $jsonString")
 
-        // Update UI if ViewModel is attached
+        // Update UI view states on Main Thread
         mainHandler.post {
             viewModel?.updateLocation(payload)
         }
@@ -271,8 +326,12 @@ class TelemetryService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        isClosedIntentionally = true
+        mainHandler.removeCallbacks(reconnectRunnable)
         stopLocationUpdates()
         stopSimulation()
+        // Cancel all coroutines running in the background service scope
+        serviceScope.cancel()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
