@@ -1,25 +1,28 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@500;700;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Sora:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
 :root {
-    --bg-primary: #060913;
-    --bg-secondary: rgba(13, 20, 38, 0.65);
-    --border-color: rgba(0, 242, 254, 0.18);
-    --border-hover: rgba(0, 242, 254, 0.45);
-    --text-primary: #f3f4f6;
-    --text-secondary: #9ca3af;
+    --bg-primary: #07090e;
+    --bg-secondary: rgba(12, 14, 25, 0.55);
+    --bg-card: rgba(15, 19, 36, 0.35);
+    --border-color: rgba(255, 255, 255, 0.04);
+    --border-hover: rgba(0, 242, 254, 0.25);
     
-    /* Neon Glow Palettes */
+    /* Neon Accent Palettes */
     --cyan-neon: #00f2fe;
-    --cyan-glow: rgba(0, 242, 254, 0.35);
-    --red-neon: #ff4d5a;
-    --red-glow: rgba(255, 77, 90, 0.35);
+    --cyan-glow: rgba(0, 242, 254, 0.2);
+    --red-neon: #ff4757;
+    --red-glow: rgba(255, 71, 87, 0.2);
     --orange-neon: #ffa502;
-    --orange-glow: rgba(255, 165, 2, 0.35);
+    --orange-glow: rgba(255, 165, 2, 0.2);
     --green-neon: #2ed573;
-    --green-glow: rgba(46, 213, 115, 0.35);
+    --green-glow: rgba(46, 213, 115, 0.2);
     
-    --card-padding: 20px;
-    --transition-speed: 0.3s;
+    --text-primary: #f8fafc;
+    --text-secondary: #64748b;
+    --text-muted: #475569;
+    
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --transition-speed: 0.2s;
 }
 
 * {
@@ -29,11 +32,12 @@
 }
 
 body {
-    font-family: 'Inter', sans-serif;
+    font-family: 'Plus Jakarta Sans', sans-serif;
     background-color: var(--bg-primary);
     background-image: 
-        radial-gradient(at 0% 0%, rgba(0, 242, 254, 0.05) 0px, transparent 50%),
-        radial-gradient(at 100% 100%, rgba(255, 77, 90, 0.05) 0px, transparent 50%);
+        radial-gradient(at 0% 0%, rgba(0, 242, 254, 0.03) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(255, 71, 87, 0.03) 0px, transparent 50%),
+        radial-gradient(at 50% 50%, rgba(15, 19, 36, 0.4) 0px, transparent 70%);
     color: var(--text-primary);
     height: 100vh;
     overflow: hidden;
@@ -41,69 +45,118 @@ body {
     flex-direction: column;
 }
 
-/* Glassmorphic Container Utility */
+/* Glassmorphic Panel Core */
 .glass-panel {
     background: var(--bg-secondary);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
     border: 1px solid var(--border-color);
     border-radius: 12px;
-    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
-    transition: border-color var(--transition-speed);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+    transition: border-color var(--transition-speed) var(--ease-out), 
+                box-shadow var(--transition-speed) var(--ease-out),
+                transform var(--transition-speed) var(--ease-out),
+                opacity var(--transition-speed) var(--ease-out),
+                filter var(--transition-speed) var(--ease-out);
 }
 
-.glass-panel:hover {
-    border-color: var(--border-hover);
-}
-
-/* Header Component */
+/* Floating Glass Header */
 header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 16px 24px;
-    border-bottom: 1px solid var(--border-color);
-    background: rgba(6, 9, 19, 0.85);
-    backdrop-filter: blur(8px);
+    margin: 16px 16px 0;
+    padding: 12px 24px;
+    background: rgba(10, 12, 22, 0.6);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    z-index: 100;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
 }
 
 .logo-section h1 {
-    font-family: 'Orbitron', sans-serif;
-    font-size: 22px;
-    font-weight: 900;
-    letter-spacing: 2px;
-    background: linear-gradient(90deg, #00f2fe, #4facfe);
+    font-family: 'Sora', sans-serif;
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
-    text-shadow: 0 0 15px rgba(0, 242, 254, 0.2);
+    text-shadow: 0 0 20px rgba(0, 242, 254, 0.1);
 }
 
 .logo-section p {
-    font-size: 11px;
+    font-size: 9px;
     color: var(--text-secondary);
     text-transform: uppercase;
-    letter-spacing: 1px;
+    letter-spacing: 1.5px;
+    margin-top: 1px;
+    font-weight: 600;
 }
 
-/* Connection Badge */
+/* Focus Filters */
+.nav-tabs {
+    display: flex;
+    gap: 4px;
+    background: rgba(255, 255, 255, 0.02);
+    padding: 3px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.02);
+}
+
+.tab-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    padding: 6px 12px;
+    cursor: pointer;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 6px;
+    transition: transform 0.15s var(--ease-out),
+                color var(--transition-speed) var(--ease-out),
+                background-color var(--transition-speed) var(--ease-out);
+}
+
+.tab-btn:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.tab-btn:active {
+    transform: scale(0.96);
+}
+
+.tab-btn.active {
+    color: var(--cyan-neon);
+    background: rgba(0, 242, 254, 0.08);
+    border: 1px solid rgba(0, 242, 254, 0.15);
+}
+
+/* Status Badge */
 .connection-status {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-family: 'Orbitron', sans-serif;
-    font-size: 12px;
-    padding: 6px 12px;
+    gap: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 5px 12px;
     border-radius: 20px;
     background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.02);
 }
 
 .status-dot {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     background-color: var(--red-neon);
     box-shadow: 0 0 8px var(--red-neon);
+    transition: background-color var(--transition-speed), box-shadow var(--transition-speed);
 }
 
 .status-dot.connected {
@@ -111,80 +164,107 @@ header {
     box-shadow: 0 0 8px var(--green-neon);
 }
 
-/* Navigation Tabs */
-.nav-tabs {
-    display: flex;
-    gap: 8px;
-}
-
-.tab-btn {
-    background: transparent;
-    border: none;
-    color: var(--text-secondary);
-    padding: 8px 16px;
-    cursor: pointer;
-    font-family: 'Orbitron', sans-serif;
-    font-size: 12px;
-    border-radius: 6px;
-    transition: all var(--transition-speed);
-}
-
-.tab-btn:hover {
-    color: var(--text-primary);
-    background: rgba(255, 255, 255, 0.05);
-}
-
-.tab-btn.active {
-    color: var(--cyan-neon);
-    background: rgba(0, 242, 254, 0.1);
-    border: 1px solid var(--border-hover);
-    box-shadow: 0 0 10px rgba(0, 242, 254, 0.1);
-}
-
-/* Main Layout Grid */
-main {
-    display: flex;
+/* Main Grid Layout */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: 320px 1fr 345px;
+    gap: 16px;
     flex: 1;
-    padding: 20px;
-    gap: 20px;
+    padding: 16px;
+    overflow: hidden;
+    height: calc(100vh - 95px);
+}
+
+/* Sidebar Column Layout */
+.col-left, .col-right {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    height: 100%;
     overflow: hidden;
 }
 
-.tab-content {
-    display: none;
+.col-center {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* Card styling */
+.widget-card {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .widget-card:hover {
+        border-color: var(--border-hover);
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55), 0 0 15px rgba(0, 242, 254, 0.03);
+    }
+}
+
+.widget-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.1);
+}
+
+.widget-header h2 {
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--text-primary);
+}
+
+.widget-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* Heights */
+.w-analytics {
+    flex: 0 0 auto;
+}
+.w-vehicles {
+    flex: 1;
+}
+.w-map {
+    flex: 1;
+    position: relative;
+}
+.w-logs {
+    flex: 0 0 240px;
+}
+.w-simulator {
+    flex: 0 0 auto;
+}
+.w-emergency {
+    flex: 0 0 auto;
+}
+.w-violations {
+    flex: 1;
+}
+
+/* Map frame */
+.map-container {
     width: 100%;
     height: 100%;
-    gap: 20px;
-}
-
-.tab-content.active {
-    display: flex;
-}
-
-/* Left panel for monitoring */
-.side-panel {
-    flex: 0 0 380px;
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    height: 100%;
-    overflow: hidden;
-}
-
-/* Central Map Panel */
-.map-panel {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-}
-
-.map-container {
-    flex: 1;
     border-radius: 8px;
     overflow: hidden;
     position: relative;
-    border: 1px solid var(--border-color);
+    border: 1px solid rgba(255, 255, 255, 0.02);
 }
 
 #map {
@@ -192,70 +272,143 @@ main {
     height: 100%;
 }
 
-/* Active Vehicles List styling */
-.panel-header {
-    padding: 16px;
-    border-bottom: 1px solid var(--border-color);
-    display: flex;
-    justify-content: space-between;
+/* Focus Mode dimming rules */
+.dashboard-grid.focus-map .widget-card:not(.w-analytics):not(.w-vehicles):not(.w-map):not(.w-logs),
+.dashboard-grid.focus-emergency .widget-card:not(.w-emergency):not(.w-map):not(.w-logs),
+.dashboard-grid.focus-violations .widget-card:not(.w-violations):not(.w-map):not(.w-logs),
+.dashboard-grid.focus-simulator .widget-card:not(.w-simulator):not(.w-map):not(.w-logs) {
+    opacity: 0.15;
+    transform: scale(0.98);
+    pointer-events: none;
+    filter: blur(1.5px);
+}
+
+/* Dynamic Emergency Alert overlay banner (Slide-in) */
+.alert-overlay-banner {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    right: 16px;
+    z-index: 1000;
+    padding: 12px 16px;
+    border-radius: 8px;
+    background: rgba(255, 71, 87, 0.95);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--red-neon);
+    box-shadow: 0 0 25px var(--red-glow);
+    display: none;
     align-items: center;
-}
-
-.panel-header h2 {
-    font-family: 'Orbitron', sans-serif;
-    font-size: 16px;
-    letter-spacing: 1px;
-}
-
-.list-container {
-    flex: 1;
-    overflow-y: auto;
-    padding: 12px;
-    display: flex;
-    flex-direction: column;
     gap: 12px;
+    animation: alertSlideIn 0.35s var(--ease-out), alertPulse 2s infinite ease-in-out;
 }
 
-/* Scrollbar Customization */
-::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+@keyframes alertSlideIn {
+    from { transform: translateY(-15px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
 }
 
-::-webkit-scrollbar-track {
-    background: rgba(0, 0, 0, 0.1);
+@keyframes alertPulse {
+    0%, 100% { box-shadow: 0 0 15px var(--red-glow); }
+    50% { box-shadow: 0 0 25px rgba(255, 71, 87, 0.4); }
 }
 
-::-webkit-scrollbar-thumb {
-    background: var(--border-color);
-    border-radius: 3px;
+.alert-overlay-banner.show {
+    display: flex;
 }
 
-::-webkit-scrollbar-thumb:hover {
-    background: var(--border-hover);
+.alert-icon-pulse {
+    font-size: 20px;
+    animation: iconPulse 0.8s infinite alternate;
 }
 
-/* Vehicle List Item Card */
-.vehicle-card {
-    padding: 14px;
+@keyframes iconPulse {
+    from { transform: scale(1); }
+    to { transform: scale(1.2); }
+}
+
+.alert-message-content {
+    flex: 1;
+}
+
+.alert-message-content h4 {
+    font-family: 'Sora', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 2px;
+}
+
+.alert-message-content p {
+    font-size: 10.5px;
+    opacity: 0.9;
+}
+
+.alert-close-btn {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: white;
+    padding: 3px 8px;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 9.5px;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-weight: 600;
+    transition: transform 0.12s var(--ease-out), background-color 0.2s;
+}
+
+.alert-close-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.alert-close-btn:active {
+    transform: scale(0.95);
+}
+
+/* Vehicle List Item styling */
+.list-container {
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
+}
+
+.vehicle-card {
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
     cursor: pointer;
-    background: rgba(255, 255, 255, 0.02);
+    background: rgba(255, 255, 255, 0.01);
+    border: 1px solid rgba(255, 255, 255, 0.02);
+    border-radius: 6px;
+    transition: transform 0.15s var(--ease-out), 
+                border-color 0.15s var(--ease-out), 
+                background-color 0.15s var(--ease-out);
 }
 
 .vehicle-card.emergency {
-    border-left: 3px solid var(--red-neon);
+    border-left: 2px solid var(--red-neon);
 }
 
 .vehicle-card.normal {
-    border-left: 3px solid var(--green-neon);
+    border-left: 2px solid var(--green-neon);
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .vehicle-card:hover {
+        transform: translateY(-1.5px);
+        background: rgba(255, 255, 255, 0.02);
+        border-color: rgba(255, 255, 255, 0.06);
+    }
+}
+
+.vehicle-card:active {
+    transform: scale(0.97);
 }
 
 .vehicle-card.active-selected {
-    background: rgba(0, 242, 254, 0.05);
-    border-color: var(--cyan-neon);
+    background: rgba(0, 242, 254, 0.03);
+    border-color: rgba(0, 242, 254, 0.2);
 }
 
 .card-top {
@@ -265,33 +418,36 @@ main {
 }
 
 .vehicle-title {
-    font-weight: 600;
-    font-size: 14px;
+    font-weight: 700;
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
 }
 
 .vehicle-type-tag {
-    font-family: 'Orbitron', sans-serif;
-    font-size: 10px;
-    padding: 3px 6px;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 8.5px;
+    font-weight: 700;
+    padding: 1.5px 5px;
     border-radius: 4px;
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.02);
 }
 
 .vehicle-type-tag.emergency-tag {
     color: var(--red-neon);
-    background: rgba(255, 77, 90, 0.1);
-    border: 1px solid rgba(255, 77, 90, 0.2);
+    background: rgba(255, 71, 87, 0.06);
+    border: 1px solid rgba(255, 71, 87, 0.15);
 }
 
 .card-details {
     display: flex;
     justify-content: space-between;
-    font-size: 12px;
+    font-size: 10.5px;
     color: var(--text-secondary);
 }
 
 .stat-value {
-    font-family: 'Orbitron', sans-serif;
+    font-family: 'JetBrains Mono', monospace;
     color: var(--text-primary);
     font-weight: bold;
 }
@@ -301,199 +457,160 @@ main {
     text-shadow: 0 0 5px var(--red-glow);
 }
 
-/* Critical Congestion Banner Overlay */
-.alert-overlay-banner {
-    position: absolute;
-    top: 20px;
-    left: 20px;
-    right: 20px;
-    z-index: 1000;
-    padding: 16px;
-    border-radius: 8px;
-    background: rgba(255, 77, 90, 0.95);
-    box-shadow: 0 0 20px var(--red-glow);
-    display: none;
-    align-items: center;
-    gap: 16px;
-    border: 1px solid #ff4d5a;
-    animation: flash 1.5s infinite;
-}
-
-@keyframes flash {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.8; }
-}
-
-.alert-overlay-banner.show {
-    display: flex;
-}
-
-.alert-icon-pulse {
-    font-size: 24px;
-    animation: pulse 1s infinite alternate;
-}
-
-@keyframes pulse {
-    0% { transform: scale(1); }
-    100% { transform: scale(1.2); }
-}
-
-.alert-message-content {
-    flex: 1;
-}
-
-.alert-message-content h4 {
-    font-family: 'Orbitron', sans-serif;
-    font-size: 14px;
-    font-weight: 700;
-    margin-bottom: 2px;
-}
-
-.alert-message-content p {
-    font-size: 12px;
-}
-
-.alert-close-btn {
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.4);
-    color: white;
-    padding: 4px 8px;
-    cursor: pointer;
-    border-radius: 4px;
-    font-size: 11px;
-}
-
-/* Logging Panels (Rule Violations / System Logs) */
-.logs-panel {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-}
-
+/* Logging System styling (Unified) */
 .logs-container {
-    flex: 1;
     overflow-y: auto;
-    padding: 16px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
+    height: 100%;
 }
 
 .log-item {
-    padding: 12px;
+    padding: 8px 10px;
     border-radius: 6px;
-    background: rgba(255, 255, 255, 0.02);
-    border-left: 3px solid rgba(255, 255, 255, 0.1);
-    font-size: 13px;
-    line-height: 1.4;
+    background: rgba(255, 255, 255, 0.005);
+    border: 1px solid rgba(255, 255, 255, 0.015);
+    border-left: 2px solid rgba(255, 255, 255, 0.06);
+    font-size: 11px;
+    line-height: 1.35;
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
+    gap: 10px;
 }
 
 .log-item.speed-violation {
     border-left-color: var(--red-neon);
-    background: rgba(255, 77, 90, 0.03);
+    background: rgba(255, 71, 87, 0.015);
 }
 
 .log-item.emergency-alert {
     border-left-color: var(--orange-neon);
-    background: rgba(255, 165, 2, 0.03);
+    background: rgba(255, 165, 2, 0.015);
 }
 
 .log-item.system-info {
     border-left-color: var(--cyan-neon);
-    background: rgba(0, 242, 254, 0.03);
+    background: rgba(0, 242, 254, 0.015);
 }
 
 .log-time {
-    font-family: 'Orbitron', sans-serif;
-    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
     color: var(--text-secondary);
+    white-space: nowrap;
 }
 
 .police-dispatch-badge {
-    font-family: 'Orbitron', sans-serif;
-    font-size: 9px;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 8px;
+    font-weight: 700;
     color: var(--cyan-neon);
-    border: 1px solid var(--border-hover);
-    padding: 2px 6px;
-    border-radius: 4px;
-    background: rgba(0, 242, 254, 0.05);
+    border: 1px solid rgba(0, 242, 254, 0.15);
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: rgba(0, 242, 254, 0.02);
+    margin-top: 3px;
+    display: inline-block;
 }
 
-/* Simulation Control Widgets */
-.sim-controls-panel {
-    padding: 16px;
+/* Analytics Custom Gauges */
+.analytics-gauge {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
 }
 
-.sim-btn-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    margin-top: 12px;
+.gauge-bar-bg {
+    width: 100%;
+    height: 6px;
+    background: rgba(0, 0, 0, 0.35);
+    border-radius: 3px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.01);
 }
 
+.gauge-bar-fill {
+    height: 100%;
+    width: 0%;
+    transition: width 0.5s var(--ease-out);
+}
+
+#avg-speed-bar {
+    background: var(--cyan-neon);
+    box-shadow: 0 0 6px var(--cyan-glow);
+}
+
+#latency-bar {
+    background: var(--green-neon);
+    box-shadow: 0 0 6px var(--green-glow);
+}
+
+/* UI Action Buttons */
 .btn {
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(255, 255, 255, 0.025);
     color: var(--text-primary);
-    border: 1px solid var(--border-color);
-    padding: 10px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    padding: 8px 12px;
     border-radius: 6px;
-    font-family: 'Orbitron', sans-serif;
-    font-size: 11px;
-    font-weight: bold;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
     cursor: pointer;
     text-transform: uppercase;
-    letter-spacing: 1px;
-    transition: all var(--transition-speed);
+    letter-spacing: 0.5px;
+    transition: transform 0.12s var(--ease-out), 
+                background-color 0.2s, 
+                border-color 0.2s, 
+                box-shadow 0.2s;
 }
 
 .btn:hover {
-    background: rgba(0, 242, 254, 0.15);
-    border-color: var(--cyan-neon);
+    background: rgba(0, 242, 254, 0.06);
+    border-color: rgba(0, 242, 254, 0.2);
 }
 
-.btn.btn-emergency {
-    border-color: rgba(255, 77, 90, 0.3);
-}
-
-.btn.btn-emergency:hover {
-    background: rgba(255, 77, 90, 0.2);
-    border-color: var(--red-neon);
-    box-shadow: 0 0 10px rgba(255, 77, 90, 0.2);
+.btn:active {
+    transform: scale(0.96);
 }
 
 .btn.btn-active {
     background: var(--cyan-neon);
-    color: #060913;
+    color: #05060b;
     border-color: var(--cyan-neon);
+    box-shadow: 0 0 10px var(--cyan-glow);
 }
 
-/* Form inputs styling */
+.btn.btn-active:hover {
+    background: #00d6e2;
+}
+
+/* Form input styling */
 .form-group {
-    margin-bottom: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 
 .form-group label {
-    font-size: 11px;
+    font-size: 9px;
+    font-weight: 600;
     color: var(--text-secondary);
-    display: block;
-    margin-bottom: 4px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
 
 .form-group input, .form-group select {
     width: 100%;
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid var(--border-color);
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.04);
     color: var(--text-primary);
-    padding: 8px 12px;
+    padding: 6px 10px;
     border-radius: 6px;
-    font-size: 13px;
+    font-size: 11.5px;
     outline: none;
+    font-family: 'Plus Jakarta Sans', sans-serif;
     transition: border-color var(--transition-speed);
 }
 
@@ -501,21 +618,71 @@ main {
     border-color: var(--cyan-neon);
 }
 
-/* Analytics gauges & HTML charts */
-.analytics-gauge {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+/* Pre block formatting */
+pre {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.03);
+    padding: 8px;
+    border-radius: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px;
+    color: var(--cyan-neon);
+    overflow: auto;
+    white-space: pre-wrap;
 }
 
-.gauge-bar-bg {
-    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+}
+::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.05);
+}
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.1);
 }
 
-#avg-speed-bar {
-    box-shadow: 0 0 10px var(--cyan-glow);
+/* ---------------------------------------------------------------------------
+   Mock / simulated feature labelling
+
+   Several panels in this dashboard display illustrative output rather than
+   results from a real subsystem. They carry these markers so an operator can
+   tell at a glance what is measured and what is staged.
+   --------------------------------------------------------------------------- */
+
+.mock-badge {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--orange-neon);
+    background: var(--orange-glow);
+    border: 1px solid rgba(255, 165, 2, 0.35);
+    border-radius: 3px;
+    padding: 1px 4px;
+    margin-left: 6px;
+    vertical-align: middle;
 }
 
-#latency-bar {
-    box-shadow: 0 0 10px var(--green-glow);
+.mock-note {
+    display: block;
+    font-size: 9.5px;
+    line-height: 1.4;
+    color: var(--text-muted);
+    font-style: italic;
+    margin-top: 4px;
+}
+
+/* The dispatch badge on a violation log entry is illustrative, not an action. */
+.police-dispatch-badge {
+    background: var(--orange-glow);
+    border: 1px solid rgba(255, 165, 2, 0.35);
+    color: var(--orange-neon);
 }

@@ -25,8 +25,17 @@ android {
         versionCode = 1
         versionName = "1.0"
 
+        // Secrets and host config come from apk/.env, which is gitignored.
+        // See apk/.env.example. Note that anything baked into BuildConfig is
+        // readable by anyone who unpacks the APK, so the Maps key must also be
+        // restricted (Android app + SHA-1) in Google Cloud Console.
         manifestPlaceholders["MAPS_API_KEY"] = env.getProperty("MAPS_API_KEY") ?: ""
         buildConfigField("String", "MAPS_API_KEY", "\"${env.getProperty("MAPS_API_KEY") ?: ""}\"")
+        buildConfigField(
+            "String",
+            "BACKEND_HOST",
+            "\"${env.getProperty("BACKEND_HOST") ?: "10.0.2.2:3000"}\""
+        )
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

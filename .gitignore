@@ -6,9 +6,10 @@ app/build/
 # Local properties
 local.properties
 
-# Secrets
+# Secrets — never commit these. See the matching .example files.
 .env
 .env.local
+admin-dashboard/config.js
 
 # IDE
 .idea/

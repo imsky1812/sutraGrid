@@ -41,6 +41,10 @@ class TelemetryService : Service() {
     private var vehicleType: String = ""
     private var isEmergency: Boolean = false
 
+    // Session token from /api/auth/login. Without it the server refuses the
+    // WebSocket upgrade, so there is no unauthenticated streaming path.
+    private var authToken: String = ""
+
     private var isSimulating: Boolean = false
     private var simulationIndex = 0
     private var simulationPoints = listOf<LatLng>()
@@ -118,7 +122,14 @@ class TelemetryService : Service() {
                 driverName = intent.getStringExtra("DRIVER_NAME") ?: ""
                 vehicleType = intent.getStringExtra("VEHICLE_TYPE") ?: ""
                 isEmergency = intent.getBooleanExtra("IS_EMERGENCY", false)
+                authToken = intent.getStringExtra("AUTH_TOKEN") ?: ""
                 isClosedIntentionally = false
+
+                if (authToken.isEmpty()) {
+                    Log.e("TelemetryService", "Refusing to start: no auth token supplied")
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
 
                 startForeground(1, createNotification())
                 connectWebSocket()
@@ -141,7 +152,9 @@ class TelemetryService : Service() {
                 startLocationUpdates()
             }
         }
-        return START_STICKY
+        // Not sticky: a system-restarted service has no auth token and could not
+        // stream anyway. The driver logs in again instead.
+        return START_NOT_STICKY
     }
 
     private fun connectWebSocket() {
@@ -157,6 +170,14 @@ class TelemetryService : Service() {
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e("TelemetryService", "WebSocket Error: ${t.message}")
+                // A rejected token will not start working on retry, so stop
+                // rather than reconnecting against a 401 forever.
+                if (response?.code == 401) {
+                    Log.e("TelemetryService", "Auth token rejected by server. Stopping service.")
+                    isClosedIntentionally = true
+                    mainHandler.post { stopSelf() }
+                    return
+                }
                 scheduleReconnect()
             }
 
@@ -167,7 +188,7 @@ class TelemetryService : Service() {
                 }
             }
         }
-        webSocket = ApiClient.createWebSocket(listener)
+        webSocket = ApiClient.createWebSocket(authToken, listener)
     }
 
     private fun scheduleReconnect() {

@@ -1,13 +1,24 @@
+// SUTRA operator dashboard.
+//
+// Rendering rule for this file: telemetry arrives from the network and is
+// therefore untrusted. Nothing from a payload is ever concatenated into an HTML
+// string or an inline attribute. Use el(), text nodes, and addEventListener.
+
+const CONFIG = window.SUTRA_CONFIG || {};
+
 let map;
 const vehicleMarkers = new Map();
 const routePolylines = new Map();
 const bypassPolylines = new Map();
 const congestionCircles = new Map();
-const serviceMarkers = [];
-let wsConnection;
+
+let wsConnection;          // dashboard subscriber socket
+let simSocket = null;      // simulator's own vehicle socket
+let reconnectTimer = null;
 
 // State management
 let activeVehicles = new Map();
+let selectedVehicleId = null;
 let speedingViolationsCount = 0;
 let simulationInterval = null;
 let simIndex = 0;
@@ -76,6 +87,87 @@ const darkMapStyle = [
     }
 ];
 
+// ---------------------------------------------------------------------------
+// Safe DOM helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Create an element. `props.text` is set via textContent, never innerHTML, so
+ * any value passed here is inert regardless of what it contains.
+ */
+function el(tag, props = {}, children = []) {
+    const node = document.createElement(tag);
+    if (props.className) node.className = props.className;
+    if (props.id) node.id = props.id;
+    if (props.text !== undefined) node.textContent = String(props.text);
+    if (props.style) Object.assign(node.style, props.style);
+    for (const child of children) {
+        if (child) node.appendChild(child);
+    }
+    return node;
+}
+
+function clear(node) {
+    while (node.firstChild) node.removeChild(node.firstChild);
+}
+
+// A labelled value pair, e.g. "Driver: Amit Sharma" with the value in bold.
+function labelled(label, value, valueClass) {
+    return el("span", {}, [
+        document.createTextNode(label + " "),
+        el("strong", { text: value, className: valueClass || "" })
+    ]);
+}
+
+function numberOr(value, fallback) {
+    return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+// ---------------------------------------------------------------------------
+// Bootstrap
+// ---------------------------------------------------------------------------
+
+// The Maps library is injected at runtime so the API key lives in config.js
+// (gitignored) rather than in the committed HTML.
+function loadGoogleMaps() {
+    if (!CONFIG.MAPS_API_KEY || CONFIG.MAPS_API_KEY.startsWith("REPLACE_")) {
+        showBootError(
+            "Google Maps API key missing. Copy admin-dashboard/config.example.js " +
+            "to config.js and set MAPS_API_KEY."
+        );
+        return;
+    }
+    const script = document.createElement("script");
+    script.src =
+        "https://maps.googleapis.com/maps/api/js?key=" +
+        encodeURIComponent(CONFIG.MAPS_API_KEY) +
+        "&libraries=geometry&callback=initMap";
+    script.async = true;
+    script.defer = true;
+    script.onerror = () => showBootError("Failed to load the Google Maps library.");
+    document.head.appendChild(script);
+}
+
+function showBootError(message) {
+    const mapEl = document.getElementById("map");
+    if (mapEl) {
+        clear(mapEl);
+        mapEl.appendChild(
+            el("div", {
+                text: message,
+                style: {
+                    padding: "24px",
+                    color: "#ff4d5a",
+                    fontFamily: "monospace",
+                    fontSize: "13px",
+                    lineHeight: "1.6"
+                }
+            })
+        );
+    }
+    logSystemMessage(message, "error");
+}
+
 // Initialize Google Maps
 function initMap() {
     map = new google.maps.Map(document.getElementById("map"), {
@@ -87,33 +179,60 @@ function initMap() {
         mapTypeControl: false,
         streetViewControl: false
     });
-    
+
     logSystemMessage("Google Map initialized with cyber-dark control theme.");
     connectWebSocket();
 }
 
+// ---------------------------------------------------------------------------
 // WebSocket Connection Management
+// ---------------------------------------------------------------------------
+
+function backendHost() {
+    return CONFIG.BACKEND_HOST || "localhost:3000";
+}
+
+// The dashboard is a subscriber. It authenticates with the operator key and
+// connects to /dashboard/stream, which is a separate endpoint from the one
+// vehicles publish on — so the dashboard can never register itself as a vehicle.
 function connectWebSocket() {
-    const wsUrl = "ws://localhost:3000/vehicle/stream";
+    if (!CONFIG.OPERATOR_KEY) {
+        showBootError("OPERATOR_KEY missing from config.js. Cannot subscribe to telemetry.");
+        return;
+    }
+
+    const wsUrl =
+        "ws://" + backendHost() + "/dashboard/stream?key=" + encodeURIComponent(CONFIG.OPERATOR_KEY);
     updateConnectionUI(false, "CONNECTING...");
-    
+
     wsConnection = new WebSocket(wsUrl);
-    
+
     wsConnection.onopen = () => {
         updateConnectionUI(true, "CONNECTED");
         logSystemMessage("Telemetry WebSocket stream connected successfully.");
     };
-    
-    wsConnection.onclose = () => {
+
+    wsConnection.onclose = (event) => {
         updateConnectionUI(false, "DISCONNECTED");
-        logSystemMessage("WebSocket stream disconnected. Retrying in 3s...", "error");
-        setTimeout(connectWebSocket, 3000);
+        // 1006 with no prior open is the browser's report of a rejected upgrade,
+        // which for this endpoint means the operator key was refused.
+        if (event.code === 1006) {
+            logSystemMessage(
+                "Stream closed. If this repeats, check that OPERATOR_KEY in config.js " +
+                "matches backend-mock/.env. Retrying in 3s...",
+                "error"
+            );
+        } else {
+            logSystemMessage("WebSocket stream disconnected. Retrying in 3s...", "error");
+        }
+        clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(connectWebSocket, 3000);
     };
-    
-    wsConnection.onerror = (err) => {
+
+    wsConnection.onerror = () => {
         logSystemMessage("WebSocket connection error. Checking server status...", "error");
     };
-    
+
     wsConnection.onmessage = (event) => {
         try {
             const payload = JSON.parse(event.data);
@@ -126,19 +245,28 @@ function connectWebSocket() {
 
 // Handle incoming WebSocket messages
 function handleTelemetryMessage(payload) {
+    if (!payload || typeof payload !== "object") return;
+
     if (payload.type === "UPDATE") {
         const vehicle = payload.data;
+        // The server validates before broadcasting, but the dashboard does not
+        // assume that: a shape check here keeps one bad frame from taking the
+        // whole render path down.
+        if (!vehicle || typeof vehicle.vehicleId !== "string") return;
+        if (!Number.isFinite(vehicle.lat) || !Number.isFinite(vehicle.lng)) return;
+        vehicle.speed = numberOr(vehicle.speed, 0);
+
         activeVehicles.set(vehicle.vehicleId, vehicle);
-        
+
         updateVehicleOnMap(vehicle);
         updateVehicleList();
         updateSystemAnalytics();
-        
+
         // Rules Check: Speeding limit = 80 km/h
         if (vehicle.speed > 80) {
             logSpeedViolation(vehicle);
         }
-        
+
         // Alerts check: Emergency message
         if (vehicle.isEmergency && vehicle.alertMessage) {
             triggerEmergencyBanner(vehicle);
@@ -146,33 +274,33 @@ function handleTelemetryMessage(payload) {
         }
     } else if (payload.type === "DISCONNECT") {
         const vehicleId = payload.vehicleId;
+        if (typeof vehicleId !== "string") return;
         removeVehicleFromMap(vehicleId);
         activeVehicles.delete(vehicleId);
+        if (selectedVehicleId === vehicleId) selectedVehicleId = null;
         updateVehicleList();
         updateSystemAnalytics();
-        logSystemMessage(`Vehicle ${vehicleId} disconnected from network.`);
+        logSystemMessage("Vehicle " + vehicleId + " disconnected from network.");
     }
 }
 
-// Update or draw markers & polylines
+// ---------------------------------------------------------------------------
+// Map rendering
+// ---------------------------------------------------------------------------
+
 function updateVehicleOnMap(vehicle) {
+    if (!map) return;
     const position = { lat: vehicle.lat, lng: vehicle.lng };
-    
-    // Icon Configuration
-    let markerColor = "green";
-    if (vehicle.isEmergency) {
-        markerColor = "red";
-    }
-    
+
+    const markerColor = vehicle.isEmergency ? "red" : "green";
     const iconUrl = `https://maps.google.com/mapfiles/ms/icons/${markerColor}-dot.png`;
 
     // 1. Vehicle Marker
     if (vehicleMarkers.has(vehicle.vehicleId)) {
         const marker = vehicleMarkers.get(vehicle.vehicleId);
         marker.setPosition(position);
-        
-        // Smoothly pan map if selected
-        if (document.getElementById(`card-${vehicle.vehicleId}`)?.classList.contains("active-selected")) {
+
+        if (selectedVehicleId === vehicle.vehicleId) {
             map.panTo(position);
         }
     } else {
@@ -182,38 +310,50 @@ function updateVehicleOnMap(vehicle) {
             title: `${vehicle.driverName} (${vehicle.vehicleId})`,
             icon: iconUrl
         });
-        
-        const infoWindow = new google.maps.InfoWindow({
-            content: `
-                <div style="color: #0b0f19; font-family: sans-serif; font-size: 13px;">
-                    <strong>Driver:</strong> ${vehicle.driverName}<br>
-                    <strong>ID:</strong> ${vehicle.vehicleId}<br>
-                    <strong>Speed:</strong> ${vehicle.speed.toFixed(1)} km/h<br>
-                    <strong>Status:</strong> ${vehicle.isEmergency ? 'EMERGENCY' : 'NORMAL'}
-                </div>
-            `
+
+        // InfoWindow content is built as a DOM node rather than an HTML string,
+        // so a driver name containing markup renders as literal text.
+        const infoContent = el("div", {
+            style: { color: "#0b0f19", fontFamily: "sans-serif", fontSize: "13px" }
         });
-        
+        const infoSpeed = el("div");
+        infoContent.appendChild(labelled("Driver:", vehicle.driverName));
+        infoContent.appendChild(el("br"));
+        infoContent.appendChild(labelled("ID:", vehicle.vehicleId));
+        infoContent.appendChild(el("br"));
+        infoContent.appendChild(infoSpeed);
+        infoContent.appendChild(
+            labelled("Status:", vehicle.isEmergency ? "EMERGENCY" : "NORMAL")
+        );
+
+        const infoWindow = new google.maps.InfoWindow({ content: infoContent });
+
         marker.addListener("click", () => {
+            // Refresh the speed line from current state each time it opens.
+            const current = activeVehicles.get(vehicle.vehicleId) || vehicle;
+            clear(infoSpeed);
+            infoSpeed.appendChild(labelled("Speed:", current.speed.toFixed(1) + " km/h"));
             infoWindow.open(map, marker);
             selectVehicleCard(vehicle.vehicleId);
         });
-        
+
         vehicleMarkers.set(vehicle.vehicleId, marker);
-        logSystemMessage(`New vehicle connected: ${vehicle.vehicleId} [${vehicle.type}]`);
+        logSystemMessage(
+            "New vehicle connected: " + vehicle.vehicleId + " [" + vehicle.type + "]"
+        );
     }
 
     // 2. Active Routing Polyline (if destination set)
-    if (vehicle.destinationLat && vehicle.destinationLng) {
-        // Build mock polyline from vehicle position to destination for visual display
+    // NOTE (mock): a straight line to the destination, not a road-following
+    // route. The road geometry lives in the Android client's Directions call.
+    if (Number.isFinite(vehicle.destinationLat) && Number.isFinite(vehicle.destinationLng)) {
         const pathCoordinates = [
             position,
             { lat: vehicle.destinationLat, lng: vehicle.destinationLng }
         ];
 
         if (routePolylines.has(vehicle.vehicleId)) {
-            const polyline = routePolylines.get(vehicle.vehicleId);
-            polyline.setPath(pathCoordinates);
+            routePolylines.get(vehicle.vehicleId).setPath(pathCoordinates);
         } else {
             const polyline = new google.maps.Polyline({
                 path: pathCoordinates,
@@ -226,18 +366,18 @@ function updateVehicleOnMap(vehicle) {
             routePolylines.set(vehicle.vehicleId, polyline);
         }
     } else {
-        // Clear polyline if no destination
         if (routePolylines.has(vehicle.vehicleId)) {
             routePolylines.get(vehicle.vehicleId).setMap(null);
             routePolylines.delete(vehicle.vehicleId);
         }
     }
 
-    // 3. Dynamic Congestion Zone Circle (Speed < 15 km/h for normal vehicles)
+    // 3. Congestion zone.
+    // NOTE (mock): this is a single-vehicle speed threshold, not congestion
+    // detection. One vehicle stopped at a red light will trigger it.
     if (!vehicle.isEmergency && vehicle.speed < 15 && vehicle.speed > 0) {
         if (congestionCircles.has(vehicle.vehicleId)) {
-            const circle = congestionCircles.get(vehicle.vehicleId);
-            circle.setCenter(position);
+            congestionCircles.get(vehicle.vehicleId).setCenter(position);
         } else {
             const circle = new google.maps.Circle({
                 strokeColor: "#ff4d5a",
@@ -250,28 +390,38 @@ function updateVehicleOnMap(vehicle) {
                 radius: 200 // 200 meters
             });
             congestionCircles.set(vehicle.vehicleId, circle);
-            logSystemMessage(`⚠️ Traffic Bottleneck detected at ${position.lat.toFixed(5)}, ${position.lng.toFixed(5)} (Speed: ${vehicle.speed.toFixed(1)} km/h)`);
+            logSystemMessage(
+                "[MOCK] Low-speed flag (single-vehicle threshold) at " +
+                position.lat.toFixed(5) + ", " + position.lng.toFixed(5) +
+                " (Speed: " + vehicle.speed.toFixed(1) + " km/h)"
+            );
         }
     } else {
-        // Clear congestion zone if speed increases or vehicle is emergency
         if (congestionCircles.has(vehicle.vehicleId)) {
             congestionCircles.get(vehicle.vehicleId).setMap(null);
             congestionCircles.delete(vehicle.vehicleId);
         }
     }
 
-    // 4. Global bypass polyline route (if Global Traffic Flow Optimizer is active)
-    if (isGlobalOptimizerActive && vehicle.destinationLat && vehicle.destinationLng) {
-        // Create an alternative route offset from the direct path to mock congestion bypass
+    // 4. Bypass overlay.
+    // NOTE (mock): a fixed ~200 m offset from the midpoint. There is no routing
+    // engine, no traffic data and no optimisation behind this line.
+    if (
+        isGlobalOptimizerActive &&
+        Number.isFinite(vehicle.destinationLat) &&
+        Number.isFinite(vehicle.destinationLng)
+    ) {
         const bypassCoordinates = [
             position,
-            { lat: (position.lat + vehicle.destinationLat) / 2 + 0.002, lng: (position.lng + vehicle.destinationLng) / 2 - 0.002 },
+            {
+                lat: (position.lat + vehicle.destinationLat) / 2 + 0.002,
+                lng: (position.lng + vehicle.destinationLng) / 2 - 0.002
+            },
             { lat: vehicle.destinationLat, lng: vehicle.destinationLng }
         ];
 
         if (bypassPolylines.has(vehicle.vehicleId)) {
-            const polyline = bypassPolylines.get(vehicle.vehicleId);
-            polyline.setPath(bypassCoordinates);
+            bypassPolylines.get(vehicle.vehicleId).setPath(bypassCoordinates);
         } else {
             const polyline = new google.maps.Polyline({
                 path: bypassCoordinates,
@@ -298,190 +448,225 @@ function updateVehicleOnMap(vehicle) {
 
 // Remove Vehicle from Map
 function removeVehicleFromMap(vehicleId) {
-    if (vehicleMarkers.has(vehicleId)) {
-        vehicleMarkers.get(vehicleId).setMap(null);
-        vehicleMarkers.delete(vehicleId);
-    }
-    if (routePolylines.has(vehicleId)) {
-        routePolylines.get(vehicleId).setMap(null);
-        routePolylines.delete(vehicleId);
-    }
-    if (congestionCircles.has(vehicleId)) {
-        congestionCircles.get(vehicleId).setMap(null);
-        congestionCircles.delete(vehicleId);
-    }
-    if (bypassPolylines.has(vehicleId)) {
-        bypassPolylines.get(vehicleId).setMap(null);
-        bypassPolylines.delete(vehicleId);
+    for (const store of [vehicleMarkers, routePolylines, congestionCircles, bypassPolylines]) {
+        if (store.has(vehicleId)) {
+            store.get(vehicleId).setMap(null);
+            store.delete(vehicleId);
+        }
     }
 }
 
-// Update Active Vehicles list on Sidebar
+// ---------------------------------------------------------------------------
+// Sidebar
+// ---------------------------------------------------------------------------
+
 function updateVehicleList() {
     const listEl = document.getElementById("vehicle-list");
     const countEl = document.getElementById("vehicle-count");
-    
-    countEl.innerText = `${activeVehicles.size} Active`;
-    
+
+    countEl.textContent = `${activeVehicles.size} Active`;
+    clear(listEl);
+
     if (activeVehicles.size === 0) {
-        listEl.innerHTML = `
-            <p class="text-secondary" style="text-align: center; padding: 20px;">No vehicles online. Start the APK client to stream telemetry.</p>
-        `;
+        listEl.appendChild(
+            el("p", {
+                className: "text-secondary",
+                text: "No vehicles online. Start the APK client to stream telemetry.",
+                style: { textAlign: "center", padding: "20px", fontSize: "12px" }
+            })
+        );
         return;
     }
-    
-    let html = "";
+
     activeVehicles.forEach((vehicle) => {
-        const isEmergency = vehicle.isEmergency;
-        const speedClass = vehicle.speed > 80 ? "speeding" : "";
-        const isSelected = document.getElementById(`card-${vehicle.vehicleId}`)?.classList.contains("active-selected") ? "active-selected" : "";
-        
-        html += `
-            <div id="card-${vehicle.vehicleId}" class="vehicle-card glass-panel ${isEmergency ? 'emergency' : 'normal'} ${isSelected}" onclick="focusVehicle('${vehicle.vehicleId}')">
-                <div class="card-top">
-                    <span class="vehicle-title">${vehicle.vehicleId}</span>
-                    <span class="vehicle-type-tag ${isEmergency ? 'emergency-tag' : ''}">${vehicle.type}</span>
-                </div>
-                <div class="card-details">
-                    <span>Driver: <strong>${vehicle.driverName}</strong></span>
-                    <span>Speed: <strong class="stat-value ${speedClass}">${vehicle.speed.toFixed(0)} km/h</strong></span>
-                </div>
-            </div>
-        `;
+        const isEmergency = Boolean(vehicle.isEmergency);
+        const classes = [
+            "vehicle-card",
+            "glass-panel",
+            isEmergency ? "emergency" : "normal",
+            selectedVehicleId === vehicle.vehicleId ? "active-selected" : ""
+        ].filter(Boolean).join(" ");
+
+        const card = el("div", { className: classes });
+        // Identity is carried on a dataset attribute and read by a delegated
+        // listener, replacing the old inline onclick that interpolated the ID
+        // straight into an attribute.
+        card.dataset.vehicleId = vehicle.vehicleId;
+
+        const top = el("div", { className: "card-top" }, [
+            el("span", { className: "vehicle-title", text: vehicle.vehicleId }),
+            el("span", {
+                className: "vehicle-type-tag" + (isEmergency ? " emergency-tag" : ""),
+                text: vehicle.type || "NORMAL"
+            })
+        ]);
+
+        const details = el("div", { className: "card-details" }, [
+            labelled("Driver:", vehicle.driverName || "-"),
+            labelled(
+                "Speed:",
+                vehicle.speed.toFixed(0) + " km/h",
+                "stat-value" + (vehicle.speed > 80 ? " speeding" : "")
+            )
+        ]);
+
+        card.appendChild(top);
+        card.appendChild(details);
+        listEl.appendChild(card);
     });
-    
-    listEl.innerHTML = html;
 }
 
-// Focus camera and UI card on a specific vehicle
 function focusVehicle(vehicleId) {
     selectVehicleCard(vehicleId);
-    
+
     const vehicle = activeVehicles.get(vehicleId);
-    if (vehicle) {
-        const position = { lat: vehicle.lat, lng: vehicle.lng };
+    if (vehicle && map) {
         map.setZoom(16);
-        map.panTo(position);
+        map.panTo({ lat: vehicle.lat, lng: vehicle.lng });
     }
 }
 
 function selectVehicleCard(vehicleId) {
+    selectedVehicleId = vehicleId;
     document.querySelectorAll(".vehicle-card").forEach((card) => {
-        card.classList.remove("active-selected");
+        card.classList.toggle("active-selected", card.dataset.vehicleId === vehicleId);
     });
-    const card = document.getElementById(`card-${vehicleId}`);
-    if (card) {
-        card.classList.add("active-selected");
-    }
 }
 
 // Connection State UI Helper
 function updateConnectionUI(connected, text) {
     const dot = document.getElementById("status-dot");
     const textEl = document.getElementById("status-text");
-    
-    if (connected) {
-        dot.classList.add("connected");
-    } else {
-        dot.classList.remove("connected");
-    }
-    textEl.innerText = text;
+
+    dot.classList.toggle("connected", connected);
+    textEl.textContent = text;
 }
 
-// System analytics custom HTML/CSS gauge updater
+// ---------------------------------------------------------------------------
+// Analytics
+// ---------------------------------------------------------------------------
+
 function updateSystemAnalytics() {
     if (activeVehicles.size === 0) {
-        document.getElementById("avg-speed-value").innerText = "0 km/h";
+        document.getElementById("avg-speed-value").textContent = "0 km/h";
         document.getElementById("avg-speed-bar").style.width = "0%";
         return;
     }
-    
+
     let totalSpeed = 0;
     activeVehicles.forEach((v) => {
         totalSpeed += v.speed;
     });
     const avgSpeed = totalSpeed / activeVehicles.size;
-    
-    document.getElementById("avg-speed-value").innerText = `${avgSpeed.toFixed(1)} km/h`;
-    
+
+    document.getElementById("avg-speed-value").textContent = `${avgSpeed.toFixed(1)} km/h`;
+
     // Cap average speed display bar at 120 km/h for gauge logic
     const pct = Math.min((avgSpeed / 120) * 100, 100);
     document.getElementById("avg-speed-bar").style.width = `${pct}%`;
-    
-    // Dynamic connection latency based on vehicle count
+
+    // NOTE (mock): this gauge is a placeholder driven by vehicle count. No
+    // latency is measured anywhere in the system.
     const latencyBar = document.getElementById("latency-bar");
     const latencyValue = document.getElementById("latency-value");
     if (activeVehicles.size > 3) {
         latencyBar.style.backgroundColor = "var(--orange-neon)";
         latencyBar.style.width = "75%";
-        latencyValue.innerText = "78% Loaded (Heavy Flow)";
+        latencyValue.textContent = "78% (placeholder)";
     } else {
         latencyBar.style.backgroundColor = "var(--green-neon)";
         latencyBar.style.width = "98%";
-        latencyValue.innerText = "98% Optimal (Normal Load)";
+        latencyValue.textContent = "98% (placeholder)";
     }
 }
 
-// Toggle Global Traffic Flow Optimizer
+// Toggle the bypass overlay. Draws alternative lines; does not reroute anything.
 function toggleGlobalOptimizer() {
     const btn = document.getElementById("optimizer-btn");
     isGlobalOptimizerActive = !isGlobalOptimizerActive;
-    
+
     if (isGlobalOptimizerActive) {
-        btn.innerText = "Disable Global Flow Optimization";
+        btn.textContent = "Hide Bypass Overlay";
         btn.classList.add("btn-active");
-        logSystemMessage("Global Traffic Routing Optimizer activated. Rerouting active fleets.");
+        logSystemMessage("[MOCK] Bypass overlay shown. No vehicle is actually rerouted.");
     } else {
-        btn.innerText = "Optimize Global Flow";
+        btn.textContent = "Show Bypass Overlay (Mock)";
         btn.classList.remove("btn-active");
-        logSystemMessage("Global Routing Optimizer disabled. Restoring default routes.");
+        logSystemMessage("[MOCK] Bypass overlay hidden.");
     }
-    
-    // Force redraw on map
+
     activeVehicles.forEach((vehicle) => {
         updateVehicleOnMap(vehicle);
     });
 }
 
-// Rules Log Engine & Police Dispatch API Log
-function logSpeedViolation(vehicle) {
-    const logsEl = document.getElementById("violation-logs");
-    
-    if (logsEl.querySelector(".text-secondary")) {
-        logsEl.innerHTML = "";
-    }
-    
-    speedingViolationsCount++;
-    document.getElementById("speeding-count-stat").innerText = speedingViolationsCount;
-    
-    const timeStr = new Date().toLocaleTimeString();
-    
-    const logHTML = `
-        <div class="log-item speed-violation">
-            <div>
-                <strong>🚨 CRITICAL SPEED VIOLATION</strong><br>
-                Vehicle <strong>${vehicle.vehicleId}</strong> (Driver: ${vehicle.driverName}) clocked at 
-                <span style="color: var(--red-neon); font-weight: bold;">${vehicle.speed.toFixed(0)} km/h</span> (Limit: 80 km/h) at location: ${vehicle.lat.toFixed(5)}, ${vehicle.lng.toFixed(5)}.
-            </div>
-            <div style="text-align: right; display: flex; flex-direction: column; gap: 4px; align-items: flex-end;">
-                <span class="log-time">${timeStr}</span>
-                <span class="police-dispatch-badge">DISPATCHED TO POLICE</span>
-            </div>
-        </div>
-    `;
-    
-    logsEl.insertAdjacentHTML("afterbegin", logHTML);
+// ---------------------------------------------------------------------------
+// Logs
+// ---------------------------------------------------------------------------
 
-    // Generate detailed mock JSON payload response from Police Department dispatch API
+function logsContainer() {
+    return document.getElementById("violation-logs");
+}
+
+function pushLogItem(node) {
+    const logsEl = logsContainer();
+    if (!logsEl) return;
+    const placeholder = logsEl.querySelector(".text-secondary");
+    if (placeholder) clear(logsEl);
+    logsEl.insertBefore(node, logsEl.firstChild);
+}
+
+function logSpeedViolation(vehicle) {
+    speedingViolationsCount++;
+    document.getElementById("speeding-count-stat").textContent = speedingViolationsCount;
+
+    const timeStr = new Date().toLocaleTimeString();
+
+    const body = el("div", {}, [
+        el("strong", { text: "🚨 CRITICAL SPEED VIOLATION" }),
+        el("br"),
+        document.createTextNode("Vehicle "),
+        el("strong", { text: vehicle.vehicleId }),
+        document.createTextNode(" (Driver: " + (vehicle.driverName || "-") + ") clocked at "),
+        el("span", {
+            text: vehicle.speed.toFixed(0) + " km/h",
+            style: { color: "var(--red-neon)", fontWeight: "bold" }
+        }),
+        document.createTextNode(
+            " (Limit: 80 km/h) at location: " +
+            vehicle.lat.toFixed(5) + ", " + vehicle.lng.toFixed(5) + "."
+        )
+    ]);
+
+    const meta = el("div", {
+        style: {
+            textAlign: "right",
+            display: "flex",
+            flexDirection: "column",
+            gap: "4px",
+            alignItems: "flex-end"
+        }
+    }, [
+        el("span", { className: "log-time", text: timeStr }),
+        el("span", { className: "police-dispatch-badge", text: "MOCK DISPATCH" })
+    ]);
+
+    pushLogItem(el("div", { className: "log-item speed-violation" }, [body, meta]));
+
+    // NOTE (mock): nothing is transmitted to any police system. The block below
+    // is a locally generated illustration of what such a response might look
+    // like, with a randomly chosen ticket number and officer name.
     const ticketId = "TK-" + Math.floor(100000 + Math.random() * 900000);
     const officerList = ["Inspector S. Patel", "Sergeant A. Rawat", "Officer K. Rao", "Inspector M. Kumar"];
     const patrolUnits = ["Patrol Unit Sector 4", "Interceptor Vehicle 12", "Highway Patrol Alpha", "City Command Unit 2"];
-    
-    const apiResponse = {
-        status: "VIOLATION_RECORDED",
-        api_endpoint: "https://api.trafficpolice.gov.in/v1/violations/dispatch",
+
+    const mockResponse = {
+        _mock: true,
+        _note: "Generated in-browser. No request is sent and no such endpoint is contacted.",
+        status: "VIOLATION_RECORDED (SIMULATED)",
+        simulated_endpoint: "(none - illustrative only)",
         timestamp: new Date().toISOString(),
-        dispatched: true,
+        dispatched: false,
         incident_data: {
             ticket_number: ticketId,
             vehicle_number: vehicle.vehicleId,
@@ -504,102 +689,100 @@ function logSpeedViolation(vehicle) {
 
     const feedEl = document.getElementById("police-api-feed");
     if (feedEl) {
-        feedEl.innerText = JSON.stringify(apiResponse, null, 2);
+        feedEl.textContent = JSON.stringify(mockResponse, null, 2);
     }
 }
 
 // Emergency Banner & Alerts
 function triggerEmergencyBanner(vehicle) {
     const banner = document.getElementById("emergency-banner");
-    const bannerTitle = document.getElementById("emergency-banner-title");
-    const bannerText = document.getElementById("emergency-banner-text");
-    
-    bannerTitle.innerText = `🚨 EMERGENCY Broadcast - ${vehicle.type} IN TRANSIT`;
-    bannerText.innerText = `Vehicle: ${vehicle.vehicleId} (Driver: ${vehicle.driverName}) has requested clear-path routing. Alert Message: "${vehicle.alertMessage}"`;
+    document.getElementById("emergency-banner-title").textContent =
+        `🚨 EMERGENCY Broadcast - ${vehicle.type} IN TRANSIT`;
+    document.getElementById("emergency-banner-text").textContent =
+        `Vehicle: ${vehicle.vehicleId} (Driver: ${vehicle.driverName}) has requested ` +
+        `clear-path routing. Alert Message: "${vehicle.alertMessage}"`;
     banner.classList.add("show");
 }
 
-// Dismiss alert banner
 function dismissEmergencyBanner() {
     document.getElementById("emergency-banner").classList.remove("show");
 }
 
 function logEmergencyAlert(vehicle) {
     const dispatchEl = document.getElementById("emergency-dispatch-details");
-    const hubsContainer = document.getElementById("emergency-hubs-list");
-    
     const timeStr = new Date().toLocaleTimeString();
-    
-    dispatchEl.innerHTML = `
-        <div style="line-height: 1.5;">
-            <strong>Vehicle ID:</strong> ${vehicle.vehicleId}<br>
-            <strong>Type:</strong> ${vehicle.type}<br>
-            <strong>Driver:</strong> ${vehicle.driverName}<br>
-            <strong>Alert:</strong> <span style="color: var(--red-neon); font-weight: bold;">${vehicle.alertMessage}</span><br>
-            <strong>Time:</strong> ${timeStr}
-        </div>
-    `;
-    
-    if (hubsContainer.querySelector(".text-secondary")) {
-        hubsContainer.innerHTML = "";
-    }
-    
-    const hubHTML = `
-        <div class="log-item emergency-alert">
-            <div>
-                <strong>🏥 NEAREST SERVICE ALERTS DISPATCHED</strong><br>
-                Clear corridor active to nearest hospital. Red Light priority overridden at all grid checkpoints for ${vehicle.vehicleId}.
-            </div>
-            <span class="log-time">${timeStr}</span>
-        </div>
-    `;
-    hubsContainer.insertAdjacentHTML("afterbegin", hubHTML);
+
+    clear(dispatchEl);
+    dispatchEl.appendChild(
+        el("div", { style: { lineHeight: "1.5" } }, [
+            labelled("Vehicle ID:", vehicle.vehicleId), el("br"),
+            labelled("Type:", vehicle.type), el("br"),
+            labelled("Driver:", vehicle.driverName), el("br"),
+            document.createTextNode("Alert: "),
+            el("span", {
+                text: vehicle.alertMessage,
+                style: { color: "var(--red-neon)", fontWeight: "bold" }
+            }),
+            el("br"),
+            labelled("Time:", timeStr)
+        ])
+    );
+
+    // NOTE (mock): no signal controller is contacted and no corridor is cleared.
+    const body = el("div", {}, [
+        el("strong", { text: "🏥 [MOCK] CORRIDOR NOTICE" }),
+        el("br"),
+        document.createTextNode(
+            "Illustrative only - no traffic signal is contacted and no corridor is " +
+            "cleared for " + vehicle.vehicleId + "."
+        )
+    ]);
+
+    pushLogItem(
+        el("div", { className: "log-item emergency-alert" }, [
+            body,
+            el("span", { className: "log-time", text: timeStr })
+        ])
+    );
 }
 
 // Logging System Utility
 function logSystemMessage(message, type = "info") {
-    const logsEl = document.getElementById("violation-logs");
+    const logsEl = logsContainer();
     if (!logsEl) return;
-    
-    if (logsEl.querySelector(".text-secondary")) {
-        logsEl.innerHTML = "";
-    }
-    
-    const timeStr = new Date().toLocaleTimeString();
-    let classType = "system-info";
-    let title = "🤖 SYSTEM CHECK";
-    
-    if (type === "error") {
-        classType = "speed-violation";
-        title = "⚠️ SYSTEM ERROR";
-    }
-    
-    const logHTML = `
-        <div class="log-item ${classType}">
-            <div>
-                <strong>${title}</strong><br>
-                ${message}
-            </div>
-            <span class="log-time">${timeStr}</span>
-        </div>
-    `;
-    
-    logsEl.insertAdjacentHTML("afterbegin", logHTML);
+
+    const isError = type === "error";
+    const body = el("div", {}, [
+        el("strong", { text: isError ? "⚠️ SYSTEM ERROR" : "🤖 SYSTEM CHECK" }),
+        el("br"),
+        document.createTextNode(String(message))
+    ]);
+
+    pushLogItem(
+        el("div", { className: "log-item " + (isError ? "speed-violation" : "system-info") }, [
+            body,
+            el("span", { className: "log-time", text: new Date().toLocaleTimeString() })
+        ])
+    );
 }
 
-// Simulator Panel Helper
+// ---------------------------------------------------------------------------
+// Browser client simulator
+// ---------------------------------------------------------------------------
+// The simulator behaves like a real vehicle client: it logs in over REST and
+// opens its own socket on /vehicle/stream. Its frames come back through the
+// normal dashboard subscription, so there is no local echo to special-case.
+
 function toggleSimType() {
     const typeSelect = document.getElementById("sim-vehicle-type");
     const alertInput = document.getElementById("sim-alert-message");
-    
-    if (typeSelect.value !== "NORMAL") {
-        alertInput.removeAttribute("disabled");
-    } else {
-        alertInput.setAttribute("disabled", "true");
-    }
+    const codeInput = document.getElementById("sim-emergency-code");
+    const isEmergency = typeSelect.value !== "NORMAL";
+
+    alertInput.disabled = !isEmergency;
+    if (codeInput) codeInput.disabled = !isEmergency;
 }
 
-// Browser Mock Simulation Engine
 const SIM_PATH = [
     { lat: 12.9716, lng: 77.5946 },
     { lat: 12.9723, lng: 77.5950 },
@@ -621,81 +804,196 @@ const SIM_PATH = [
     { lat: 12.9709, lng: 77.5944 }
 ];
 
-function toggleSimulatorEngine() {
-    const startBtn = document.getElementById("sim-start-btn");
+function simLog(line) {
     const coordDisplay = document.getElementById("sim-coordinate-display");
-    
-    if (!isSimulating) {
-        if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-            isSimulating = true;
-            simIndex = 0;
-            startBtn.innerText = "Stop Browser Simulation";
-            startBtn.style.background = "var(--red-neon)";
-            coordDisplay.innerHTML = "=== Simulation Started ===\n";
-            
-            simulationInterval = setInterval(() => {
-                const vehicleId = document.getElementById("sim-vehicle-id").value;
-                const driverName = document.getElementById("sim-driver-name").value;
-                const type = document.getElementById("sim-vehicle-type").value;
-                const speed = parseFloat(document.getElementById("sim-speed").value);
-                const isEmergency = type !== "NORMAL";
-                const alertMessage = isEmergency ? document.getElementById("sim-alert-message").value : null;
-                
-                const point = SIM_PATH[simIndex];
-                
-                const payload = {
-                    vehicleId: vehicleId,
-                    driverName: driverName,
-                    type: type,
-                    lat: point.lat,
-                    lng: point.lng,
-                    speed: speed,
-                    direction: 90.0, // mock bearing
-                    timestamp: Math.floor(Date.now() / 1000),
-                    isEmergency: isEmergency,
-                    destinationLat: isEmergency ? 12.9760 : null,
-                    destinationLng: isEmergency ? 77.6010 : null,
-                    destinationName: isEmergency ? "City General Hospital" : null,
-                    alertMessage: alertMessage
-                };
-                
-                // Transmit simulated coordinates to the WebSocket server
-                wsConnection.send(JSON.stringify(payload));
-                
-                coordDisplay.innerHTML += `[${new Date().toLocaleTimeString()}] Sent: Lat: ${point.lat.toFixed(5)}, Lng: ${point.lng.toFixed(5)}, Speed: ${speed.toFixed(0)} km/h\n`;
-                coordDisplay.scrollTop = coordDisplay.scrollHeight;
-                
-                simIndex = (simIndex + 1) % SIM_PATH.length;
-            }, 1000);
-            
-            logSystemMessage("Browser-side vehicle simulation runner active.");
-        } else {
-            alert("Cannot start simulation. WebSocket is disconnected.");
-        }
-    } else {
-        isSimulating = false;
-        clearInterval(simulationInterval);
-        startBtn.innerText = "Start Browser Simulation";
-        startBtn.style.background = "var(--cyan-neon)";
-        coordDisplay.innerHTML += "=== Simulation Stopped ===";
-        logSystemMessage("Browser-side vehicle simulation stopped.");
-    }
+    coordDisplay.textContent += line + "\n";
+    coordDisplay.scrollTop = coordDisplay.scrollHeight;
 }
 
-// Tabs UI Handler
-function switchTab(tabId) {
-    document.querySelectorAll(".tab-content").forEach((content) => {
-        content.classList.remove("active");
-    });
-    document.querySelectorAll(".tab-btn").forEach((btn) => {
-        btn.classList.remove("active");
-    });
-    
-    document.getElementById(tabId).classList.add("active");
-    
-    // Mark target button active
-    const btn = Array.from(document.querySelectorAll(".tab-btn")).find(
-        (b) => b.innerText.toLowerCase() === tabId.replace("-tab", "").replace("violations", "rule violations").replace("simulator", "control simulator")
+async function toggleSimulatorEngine() {
+    if (isSimulating) {
+        stopSimulator();
+        return;
+    }
+
+    const startBtn = document.getElementById("sim-start-btn");
+    const coordDisplay = document.getElementById("sim-coordinate-display");
+
+    const vehicleId = document.getElementById("sim-vehicle-id").value.trim();
+    const driverName = document.getElementById("sim-driver-name").value.trim();
+    const type = document.getElementById("sim-vehicle-type").value;
+    const isEmergency = type !== "NORMAL";
+    const emergencyCode = isEmergency
+        ? document.getElementById("sim-emergency-code").value.trim()
+        : null;
+
+    startBtn.disabled = true;
+    coordDisplay.textContent = "=== Authenticating ===\n";
+
+    let token;
+    try {
+        const res = await fetch("http://" + backendHost() + "/api/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                name: driverName,
+                vehicleId: vehicleId,
+                vehicleType: type,
+                isEmergency: isEmergency,
+                emergencyCode: emergencyCode
+            })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+            simLog("LOGIN FAILED: " + (data.message || res.status));
+            logSystemMessage("Simulator login rejected: " + (data.message || res.status), "error");
+            startBtn.disabled = false;
+            return;
+        }
+        token = data.token;
+        simLog("Login OK. Emergency granted: " + Boolean(data.isEmergency));
+    } catch (e) {
+        simLog("LOGIN ERROR: backend unreachable.");
+        logSystemMessage("Simulator could not reach the backend for login.", "error");
+        startBtn.disabled = false;
+        return;
+    }
+
+    simSocket = new WebSocket(
+        "ws://" + backendHost() + "/vehicle/stream?token=" + encodeURIComponent(token)
     );
-    if (btn) btn.classList.add("active");
+
+    simSocket.onopen = () => {
+        isSimulating = true;
+        simIndex = 0;
+        startBtn.disabled = false;
+        startBtn.textContent = "Stop Browser Simulation";
+        startBtn.style.background = "var(--red-neon)";
+        simLog("=== Simulation Started ===");
+        logSystemMessage("Browser-side vehicle simulation active as " + vehicleId + ".");
+
+        simulationInterval = setInterval(() => {
+            if (!simSocket || simSocket.readyState !== WebSocket.OPEN) return;
+
+            const speed = parseFloat(document.getElementById("sim-speed").value) || 0;
+            const alertMessage = isEmergency
+                ? document.getElementById("sim-alert-message").value
+                : null;
+            const point = SIM_PATH[simIndex];
+
+            // Identity fields are ignored by the server, which uses the session
+            // bound to this token. They are sent only to match the real client's
+            // payload shape.
+            simSocket.send(JSON.stringify({
+                vehicleId: vehicleId,
+                driverName: driverName,
+                type: type,
+                lat: point.lat,
+                lng: point.lng,
+                speed: speed,
+                direction: 90.0,
+                timestamp: Math.floor(Date.now() / 1000),
+                isEmergency: isEmergency,
+                destinationLat: isEmergency ? 12.9760 : null,
+                destinationLng: isEmergency ? 77.6010 : null,
+                destinationName: isEmergency ? "City General Hospital" : null,
+                alertMessage: alertMessage
+            }));
+
+            simLog(
+                `[${new Date().toLocaleTimeString()}] Sent: Lat: ${point.lat.toFixed(5)}, ` +
+                `Lng: ${point.lng.toFixed(5)}, Speed: ${speed.toFixed(0)} km/h`
+            );
+
+            simIndex = (simIndex + 1) % SIM_PATH.length;
+        }, 1000);
+    };
+
+    simSocket.onclose = () => {
+        if (isSimulating) {
+            simLog("=== Socket closed by server ===");
+            stopSimulator();
+        } else {
+            startBtn.disabled = false;
+        }
+    };
+
+    simSocket.onerror = () => {
+        simLog("Vehicle socket error - token may have been rejected.");
+    };
 }
+
+function stopSimulator() {
+    const startBtn = document.getElementById("sim-start-btn");
+    isSimulating = false;
+    clearInterval(simulationInterval);
+    simulationInterval = null;
+
+    if (simSocket) {
+        const socket = simSocket;
+        simSocket = null;
+        if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+            socket.close(1000, "Simulation stopped");
+        }
+    }
+
+    startBtn.disabled = false;
+    startBtn.textContent = "Start Browser Simulation";
+    startBtn.style.background = "var(--cyan-neon)";
+    simLog("=== Simulation Stopped ===");
+    logSystemMessage("Browser-side vehicle simulation stopped.");
+}
+
+// ---------------------------------------------------------------------------
+// Tabs
+// ---------------------------------------------------------------------------
+
+function switchTab(tabId) {
+    document.querySelectorAll(".tab-btn").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.tab === tabId);
+    });
+
+    const dashboard = document.querySelector(".dashboard-grid");
+    if (dashboard) {
+        dashboard.classList.remove(
+            "focus-all", "focus-map", "focus-emergency", "focus-violations", "focus-simulator"
+        );
+        dashboard.classList.add("focus-" + tabId.replace("-tab", ""));
+    }
+
+    const filterName = tabId
+        .replace("-tab", "")
+        .toUpperCase()
+        .replace("MAP", "TRAFFIC")
+        .replace("ALL", "ALL SYSTEMS");
+    logSystemMessage(`Command Center switched focus to: ${filterName}`);
+}
+
+// ---------------------------------------------------------------------------
+// Wiring
+// ---------------------------------------------------------------------------
+
+document.addEventListener("DOMContentLoaded", () => {
+    // Delegated click handling replaces the inline onclick attributes that
+    // previously interpolated vehicle IDs into markup.
+    document.getElementById("vehicle-list").addEventListener("click", (event) => {
+        const card = event.target.closest(".vehicle-card");
+        if (card && card.dataset.vehicleId) {
+            focusVehicle(card.dataset.vehicleId);
+        }
+    });
+
+    document.querySelectorAll(".tab-btn").forEach((btn) => {
+        btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+    });
+
+    document.getElementById("optimizer-btn").addEventListener("click", toggleGlobalOptimizer);
+    document.getElementById("sim-start-btn").addEventListener("click", toggleSimulatorEngine);
+    document.getElementById("sim-vehicle-type").addEventListener("change", toggleSimType);
+    document.querySelector(".alert-close-btn").addEventListener("click", dismissEmergencyBanner);
+
+    loadGoogleMaps();
+});
+
+// initMap is referenced by the Maps loader callback, which resolves off window.
+window.initMap = initMap;

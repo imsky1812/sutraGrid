@@ -8,6 +8,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -16,11 +17,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
+import com.google.android.gms.maps.model.JointType
 import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.RoundCap
 import com.google.maps.android.compose.*
 import com.sutra.vehicle.service.TelemetryService
 
@@ -68,6 +72,9 @@ fun DashboardScreen(
     var selectedDest by remember { mutableStateOf<PredefinedDestination?>(null) }
     var alertActive by remember { mutableStateOf(false) }
 
+    var customLat by remember { mutableStateOf("") }
+    var customLng by remember { mutableStateOf("") }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -111,7 +118,16 @@ fun DashboardScreen(
                 modifier = Modifier.fillMaxSize(),
                 cameraPositionState = cameraPositionState,
                 properties = MapProperties(isMyLocationEnabled = true),
-                uiSettings = MapUiSettings(zoomControlsEnabled = true)
+                uiSettings = MapUiSettings(zoomControlsEnabled = true),
+                onMapLongClick = { latLng ->
+                    // Set custom destination from map
+                    val currentLoc = vehicleLocation?.let { LatLng(it.lat, it.lng) }
+                        ?: LatLng(12.9716, 77.5946)
+                    viewModel.fetchDirections(currentLoc, latLng, "Pinned Destination")
+                    selectedDest = PredefinedDestination("Pinned Destination", latLng, false)
+                    customLat = latLng.latitude.toString()
+                    customLng = latLng.longitude.toString()
+                }
             ) {
                 // 1. Vehicle Marker
                 vehicleLocation?.let {
@@ -124,11 +140,17 @@ fun DashboardScreen(
                 }
 
                 // 2. Active Route Polyline
+                // Only drawn when a real Directions result is loaded. There is
+                // deliberately no placeholder line here: a stray polyline is
+                // indistinguishable from a real route on the map.
                 if (viewModel.directionsRoute.isNotEmpty()) {
                     Polyline(
                         points = viewModel.directionsRoute,
-                        color = MaterialTheme.colorScheme.primary,
-                        width = 12f
+                        color = if (viewModel.isRouteCongested) Color.Red else Color(0xFF2E7D32), // Green
+                        width = 16f,
+                        jointType = JointType.ROUND,
+                        startCap = RoundCap(),
+                        endCap = RoundCap()
                     )
                 }
 
@@ -197,6 +219,11 @@ fun DashboardScreen(
                             Text("Active Destination:", fontSize = 13.sp)
                             Text(viewModel.destinationName ?: "", fontWeight = FontWeight.Bold, color = Color.Red, fontSize = 13.sp)
                         }
+                        if (viewModel.directionsRoute.isEmpty()) {
+                            Text("No route found. Check API Key/Network.", color = Color.Red, fontSize = 11.sp)
+                        } else {
+                            Text("Route loaded (${viewModel.directionsRoute.size} points)", color = Color(0xFF2E7D32), fontSize = 11.sp)
+                        }
                     }
                 }
             }
@@ -216,7 +243,7 @@ fun DashboardScreen(
                             onClick = { showDestMenu = true },
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(selectedDest?.name ?: "Select Destination Location")
+                            Text(selectedDest?.name ?: "Select Predefined Destination")
                         }
 
                         DropdownMenu(
@@ -235,9 +262,54 @@ fun DashboardScreen(
                                         val currentLoc = vehicleLocation?.let { LatLng(it.lat, it.lng) }
                                             ?: LatLng(12.9716, 77.5946)
                                         viewModel.fetchDirections(currentLoc, dest.location, dest.name)
+                                        customLat = dest.location.latitude.toString()
+                                        customLng = dest.location.longitude.toString()
                                     }
                                 )
                             }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Or enter coordinates / Long-press on map", fontSize = 12.sp, color = Color.Gray)
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = customLat,
+                            onValueChange = { customLat = it },
+                            label = { Text("Lat", fontSize = 11.sp) },
+                            modifier = Modifier.weight(1f),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = customLng,
+                            onValueChange = { customLng = it },
+                            label = { Text("Lng", fontSize = 11.sp) },
+                            modifier = Modifier.weight(1f),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true
+                        )
+                        Button(
+                            onClick = {
+                                val lat = customLat.toDoubleOrNull()
+                                val lng = customLng.toDoubleOrNull()
+                                if (lat != null && lng != null) {
+                                    val target = LatLng(lat, lng)
+                                    val currentLoc = vehicleLocation?.let { LatLng(it.lat, it.lng) }
+                                        ?: LatLng(12.9716, 77.5946)
+                                    viewModel.fetchDirections(currentLoc, target, "Custom Destination")
+                                    selectedDest = PredefinedDestination("Custom Destination", target, false)
+                                }
+                            },
+                            contentPadding = PaddingValues(horizontal = 12.dp)
+                        ) {
+                            Text("Set")
                         }
                     }
 
@@ -246,6 +318,8 @@ fun DashboardScreen(
                         Button(
                             onClick = {
                                 selectedDest = null
+                                customLat = ""
+                                customLng = ""
                                 viewModel.clearActiveRoute()
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
@@ -311,6 +385,25 @@ fun DashboardScreen(
                             onCheckedChange = { viewModel.setRecording(it) }
                         )
                     }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Simulate Route Traffic/Congestion:")
+                        Switch(
+                            checked = viewModel.isRouteCongested,
+                            onCheckedChange = { viewModel.isRouteCongested = it }
+                        )
+                    }
+                    Text(
+                        "Mock: recolours the route line only. No live traffic data is used.",
+                        fontSize = 11.sp,
+                        color = Color.Gray
+                    )
 
                     Spacer(modifier = Modifier.height(8.dp))
 

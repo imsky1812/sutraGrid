@@ -34,13 +34,29 @@ class DashboardViewModel : ViewModel() {
     var isRecordingHistory by mutableStateOf(false)
     var isSimulatingActive by mutableStateOf(false)
     var activeSimulationMode by mutableStateOf("PRESET") // "PRESET", "HISTORY", "ROUTE"
+    var isRouteCongested by mutableStateOf(false)
 
     fun updateLocation(payload: VehicleUpdatePayload) {
         vehicleLocation = payload
         updateNearestServices(LatLng(payload.lat, payload.lng))
+
+        // MOCK: a single-vehicle speed threshold, not congestion detection.
+        // Sitting at a red light on a clear road will trip this.
+        if (destinationCoordinates != null && payload.speed > 0 && payload.speed < 15) {
+            isRouteCongested = true
+        } else if (payload.speed >= 15) {
+            isRouteCongested = false
+        }
     }
 
     fun fetchDirections(origin: LatLng, dest: LatLng, name: String) {
+        val apiKey = BuildConfig.MAPS_API_KEY
+        Log.d("DashboardViewModel", "Fetching directions. API Key length: ${apiKey.length}")
+        if (apiKey.isEmpty()) {
+            Log.e("DashboardViewModel", "MAPS_API_KEY is empty! Check your .env file.")
+        }
+
+        Log.d("DashboardViewModel", "Fetching directions from $origin to $dest")
         viewModelScope.launch {
             try {
                 val originStr = "${origin.latitude},${origin.longitude}"
@@ -50,6 +66,7 @@ class DashboardViewModel : ViewModel() {
                     destination = destStr,
                     apiKey = BuildConfig.MAPS_API_KEY
                 )
+                Log.d("DashboardViewModel", "Directions Response Status: ${response.status}")
                 if (response.status == "OK" && response.routes.isNotEmpty()) {
                     val points = PolylineDecoder.decode(response.routes[0].overview_polyline.points)
                     directionsRoute = points
@@ -64,6 +81,9 @@ class DashboardViewModel : ViewModel() {
                     Log.d("DashboardViewModel", "Successfully loaded Google Directions: ${points.size} points")
                 } else {
                     Log.e("DashboardViewModel", "Directions API error: ${response.status}")
+                    if (response.status == "REQUEST_DENIED") {
+                        Log.e("DashboardViewModel", "Check if Directions API is enabled in Google Cloud Console and API Key is valid.")
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("DashboardViewModel", "Error fetching directions", e)
@@ -71,11 +91,17 @@ class DashboardViewModel : ViewModel() {
         }
     }
 
+    /**
+     * MOCK: these are not real facilities and this is not a proximity search.
+     * Each marker is a fixed offset from the vehicle, so it follows the vehicle
+     * around the map. Replacing this means a Places/POI lookup keyed on the
+     * current position.
+     */
     private fun updateNearestServices(location: LatLng) {
         nearestServices = listOf(
-            ServiceMarker("City General Hospital", LatLng(location.latitude + 0.005, location.longitude + 0.005), "HOSPITAL"),
-            ServiceMarker("Metro Police Station", LatLng(location.latitude - 0.003, location.longitude - 0.004), "POLICE"),
-            ServiceMarker("Central Fire Station", LatLng(location.latitude + 0.007, location.longitude - 0.002), "FIRE")
+            ServiceMarker("[MOCK] Hospital placeholder", LatLng(location.latitude + 0.005, location.longitude + 0.005), "HOSPITAL"),
+            ServiceMarker("[MOCK] Police placeholder", LatLng(location.latitude - 0.003, location.longitude - 0.004), "POLICE"),
+            ServiceMarker("[MOCK] Fire station placeholder", LatLng(location.latitude + 0.007, location.longitude - 0.002), "FIRE")
         )
     }
 

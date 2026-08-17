@@ -28,7 +28,23 @@ data class VehicleUpdatePayload(
 data class AuthResponse(
     val success: Boolean,
     val token: String?,
-    val message: String?
+    val message: String?,
+    // Emergency status is decided by the server, not requested by the client.
+    // Whatever comes back here is what the vehicle actually holds.
+    val isEmergency: Boolean = false,
+    val vehicleType: String? = null
+)
+
+/**
+ * The outcome of a successful login. [isEmergency] and [vehicleType] mirror what
+ * the server granted, which may be narrower than what the driver asked for.
+ */
+data class LoginResult(
+    val token: String,
+    val driverName: String,
+    val vehicleId: String,
+    val vehicleType: String,
+    val isEmergency: Boolean
 )
 
 enum class VehicleType {

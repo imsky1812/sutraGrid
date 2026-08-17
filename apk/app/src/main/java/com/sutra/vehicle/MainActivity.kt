@@ -10,6 +10,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -17,6 +21,7 @@ import androidx.navigation.compose.rememberNavController
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.sutra.vehicle.data.LoginResult
 import com.sutra.vehicle.service.TelemetryService
 import com.sutra.vehicle.ui.AuthScreen
 import com.sutra.vehicle.ui.DashboardScreen
@@ -49,53 +54,66 @@ class MainActivity : ComponentActivity() {
 
                     val navController = rememberNavController()
                     val dashboardViewModel: DashboardViewModel = viewModel()
-                    
+
+                    // The session is held here rather than encoded into the nav
+                    // route: the token has no business in a back-stack URL, and
+                    // route arguments broke on names containing '/'.
+                    var session by remember { mutableStateOf<LoginResult?>(null) }
+
                     // Attach ViewModel to Service for UI updates
                     TelemetryService.viewModel = dashboardViewModel
 
                     NavHost(navController = navController, startDestination = "auth") {
                         composable("auth") {
-                            AuthScreen(onLoginSuccess = { name, vehicleId, type, isEmergency ->
-                                // Start Foreground Service
+                            AuthScreen(onLoginSuccess = { result ->
+                                session = result
+
                                 val serviceIntent = Intent(this@MainActivity, TelemetryService::class.java).apply {
                                     action = "START_SERVICE"
-                                    putExtra("DRIVER_NAME", name)
-                                    putExtra("VEHICLE_ID", vehicleId)
-                                    putExtra("VEHICLE_TYPE", type)
-                                    putExtra("IS_EMERGENCY", isEmergency)
+                                    putExtra("DRIVER_NAME", result.driverName)
+                                    putExtra("VEHICLE_ID", result.vehicleId)
+                                    putExtra("VEHICLE_TYPE", result.vehicleType)
+                                    putExtra("IS_EMERGENCY", result.isEmergency)
+                                    putExtra("AUTH_TOKEN", result.token)
                                 }
                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                                     startForegroundService(serviceIntent)
                                 } else {
                                     startService(serviceIntent)
                                 }
-                                navController.navigate("dashboard/$name/$vehicleId/$type/$isEmergency") {
+                                navController.navigate("dashboard") {
                                     popUpTo("auth") { inclusive = true }
                                 }
                             })
                         }
-                        
-                        composable("dashboard/{name}/{vehicleId}/{type}/{isEmergency}") { backStackEntry ->
-                            val driverName = backStackEntry.arguments?.getString("name") ?: ""
-                            val vehicleId = backStackEntry.arguments?.getString("vehicleId") ?: ""
-                            val type = backStackEntry.arguments?.getString("type") ?: ""
-                            val isEmergency = backStackEntry.arguments?.getString("isEmergency")?.toBoolean() ?: false
-                            
-                            DashboardScreen(
-                                vehicleId = vehicleId, 
-                                vehicleType = type, 
-                                isEmergencyFlag = isEmergency,
-                                viewModel = dashboardViewModel,
-                                onStopStreaming = {
-                                    val serviceIntent = Intent(this@MainActivity, TelemetryService::class.java).apply {
-                                        action = "STOP_SERVICE"
-                                    }
-                                    startService(serviceIntent)
-                                    navController.navigate("auth") {
-                                        popUpTo(0)
-                                    }
+
+                        composable("dashboard") {
+                            val active = session
+                            if (active == null) {
+                                // Process death can restore the dashboard route
+                                // without a session; send the driver back to log
+                                // in rather than streaming with no token.
+                                LaunchedEffect(Unit) {
+                                    navController.navigate("auth") { popUpTo(0) }
                                 }
-                            )
+                            } else {
+                                DashboardScreen(
+                                    vehicleId = active.vehicleId,
+                                    vehicleType = active.vehicleType,
+                                    isEmergencyFlag = active.isEmergency,
+                                    viewModel = dashboardViewModel,
+                                    onStopStreaming = {
+                                        val serviceIntent = Intent(this@MainActivity, TelemetryService::class.java).apply {
+                                            action = "STOP_SERVICE"
+                                        }
+                                        startService(serviceIntent)
+                                        session = null
+                                        navController.navigate("auth") {
+                                            popUpTo(0)
+                                        }
+                                    }
+                                )
+                            }
                         }
                     }
                 }
