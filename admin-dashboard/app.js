@@ -20,6 +20,18 @@ let reconnectTimer = null;
 let activeVehicles = new Map();
 let selectedVehicleId = null;
 let speedingViolationsCount = 0;
+
+// Speeding is logged once per episode, not once per frame. Telemetry arrives at
+// 1 Hz, so counting every frame turned a single vehicle speeding for a minute
+// into 60 "tickets" and made the counter meaningless.
+const SPEED_LIMIT_KMH = 80;
+// A vehicle must drop this far below the limit before a new episode can start,
+// so hovering at 80 km/h does not flap the counter.
+const SPEED_CLEAR_KMH = 75;
+const speedingVehicles = new Set();
+
+// Cap on rendered log entries. The feed previously grew without bound.
+const MAX_LOG_ITEMS = 200;
 let simulationInterval = null;
 let simIndex = 0;
 let isSimulating = false;
@@ -262,9 +274,15 @@ function handleTelemetryMessage(payload) {
         updateVehicleList();
         updateSystemAnalytics();
 
-        // Rules Check: Speeding limit = 80 km/h
-        if (vehicle.speed > 80) {
-            logSpeedViolation(vehicle);
+        // Rules check: log the transition into a speeding episode, not each
+        // frame spent in one.
+        if (vehicle.speed > SPEED_LIMIT_KMH) {
+            if (!speedingVehicles.has(vehicle.vehicleId)) {
+                speedingVehicles.add(vehicle.vehicleId);
+                logSpeedViolation(vehicle);
+            }
+        } else if (vehicle.speed < SPEED_CLEAR_KMH) {
+            speedingVehicles.delete(vehicle.vehicleId);
         }
 
         // Alerts check: Emergency message
@@ -277,6 +295,7 @@ function handleTelemetryMessage(payload) {
         if (typeof vehicleId !== "string") return;
         removeVehicleFromMap(vehicleId);
         activeVehicles.delete(vehicleId);
+        speedingVehicles.delete(vehicleId);
         if (selectedVehicleId === vehicleId) selectedVehicleId = null;
         updateVehicleList();
         updateSystemAnalytics();
@@ -506,7 +525,7 @@ function updateVehicleList() {
             labelled(
                 "Speed:",
                 vehicle.speed.toFixed(0) + " km/h",
-                "stat-value" + (vehicle.speed > 80 ? " speeding" : "")
+                "stat-value" + (vehicle.speed > SPEED_LIMIT_KMH ? " speeding" : "")
             )
         ]);
 
@@ -614,6 +633,11 @@ function pushLogItem(node) {
     const placeholder = logsEl.querySelector(".text-secondary");
     if (placeholder) clear(logsEl);
     logsEl.insertBefore(node, logsEl.firstChild);
+
+    // Newest first, so trimming from the end drops the oldest entries.
+    while (logsEl.childElementCount > MAX_LOG_ITEMS) {
+        logsEl.removeChild(logsEl.lastElementChild);
+    }
 }
 
 function logSpeedViolation(vehicle) {
@@ -633,7 +657,7 @@ function logSpeedViolation(vehicle) {
             style: { color: "var(--red-neon)", fontWeight: "bold" }
         }),
         document.createTextNode(
-            " (Limit: 80 km/h) at location: " +
+            ` (Limit: ${SPEED_LIMIT_KMH} km/h) at location: ` +
             vehicle.lat.toFixed(5) + ", " + vehicle.lng.toFixed(5) + "."
         )
     ]);
@@ -673,7 +697,7 @@ function logSpeedViolation(vehicle) {
             driver: vehicle.driverName,
             offense: "SPEED_LIMIT_EXCEEDED",
             speed_recorded: `${vehicle.speed.toFixed(1)} km/h`,
-            speed_limit: "80.0 km/h",
+            speed_limit: `${SPEED_LIMIT_KMH}.0 km/h`,
             location: {
                 latitude: vehicle.lat,
                 longitude: vehicle.lng

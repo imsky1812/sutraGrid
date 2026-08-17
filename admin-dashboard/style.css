@@ -272,15 +272,50 @@ header {
     height: 100%;
 }
 
-/* Focus Mode dimming rules */
-.dashboard-grid.focus-map .widget-card:not(.w-analytics):not(.w-vehicles):not(.w-map):not(.w-logs),
-.dashboard-grid.focus-emergency .widget-card:not(.w-emergency):not(.w-map):not(.w-logs),
-.dashboard-grid.focus-violations .widget-card:not(.w-violations):not(.w-map):not(.w-logs),
-.dashboard-grid.focus-simulator .widget-card:not(.w-simulator):not(.w-map):not(.w-logs) {
-    opacity: 0.15;
-    transform: scale(0.98);
-    pointer-events: none;
-    filter: blur(1.5px);
+/* ---------------------------------------------------------------------------
+   Focus modes
+
+   Focusing a tab removes the irrelevant widgets from layout and collapses the
+   column that held them, so the remaining panels actually gain the space. The
+   previous approach dimmed and blurred them while leaving their grid tracks at
+   full width, which meant "focus" never made the map or the focused panel any
+   larger.
+   --------------------------------------------------------------------------- */
+
+/* Live Traffic: keep the fleet sidebar and the map, drop the right column. */
+.dashboard-grid.focus-map {
+    grid-template-columns: 320px 1fr;
+}
+.dashboard-grid.focus-map .col-right {
+    display: none;
+}
+
+/* The three right-hand modes drop the analytics sidebar and widen the panel. */
+.dashboard-grid.focus-emergency,
+.dashboard-grid.focus-violations,
+.dashboard-grid.focus-simulator {
+    grid-template-columns: 1fr 400px;
+}
+.dashboard-grid.focus-emergency .col-left,
+.dashboard-grid.focus-violations .col-left,
+.dashboard-grid.focus-simulator .col-left {
+    display: none;
+}
+
+/* Within the right column, show only the focused widget and let it fill. */
+.dashboard-grid.focus-emergency .w-simulator,
+.dashboard-grid.focus-emergency .w-violations,
+.dashboard-grid.focus-violations .w-simulator,
+.dashboard-grid.focus-violations .w-emergency,
+.dashboard-grid.focus-simulator .w-emergency,
+.dashboard-grid.focus-simulator .w-violations {
+    display: none;
+}
+
+.dashboard-grid.focus-emergency .w-emergency,
+.dashboard-grid.focus-violations .w-violations,
+.dashboard-grid.focus-simulator .w-simulator {
+    flex: 1;
 }
 
 /* Dynamic Emergency Alert overlay banner (Slide-in) */
@@ -685,4 +720,157 @@ pre {
     background: var(--orange-glow);
     border: 1px solid rgba(255, 165, 2, 0.35);
     color: var(--orange-neon);
+}
+
+/* ---------------------------------------------------------------------------
+   Responsive layout
+
+   The grid was previously a fixed 320px / 1fr / 345px at a locked
+   calc(100vh - 95px) with overflow hidden, and no layout breakpoints at all.
+   Below roughly 1100px the centre column collapsed, and on a short laptop
+   screen the widgets were clipped with no way to scroll to them.
+
+   Wide screens keep the locked-viewport control-room layout. Narrower ones
+   progressively hand height back to the document and let the page scroll.
+   --------------------------------------------------------------------------- */
+
+/* Large desktop: tighten the side columns before anything has to collapse. */
+@media (max-width: 1500px) {
+    .dashboard-grid {
+        grid-template-columns: 280px 1fr 310px;
+        gap: 12px;
+        padding: 12px;
+    }
+    .dashboard-grid.focus-map {
+        grid-template-columns: 280px 1fr;
+    }
+    .dashboard-grid.focus-emergency,
+    .dashboard-grid.focus-violations,
+    .dashboard-grid.focus-simulator {
+        grid-template-columns: 1fr 360px;
+    }
+}
+
+/* Short viewports: give the map its height back by shrinking the log feed. */
+@media (max-height: 860px) {
+    .w-logs {
+        flex: 0 0 180px;
+    }
+}
+
+@media (max-height: 720px) {
+    .w-logs {
+        flex: 0 0 140px;
+    }
+    .widget-body {
+        padding: 10px;
+    }
+}
+
+/* Tablet / small laptop: two columns. The right-hand tools move under the map,
+   and the page becomes scrollable rather than clipped. */
+@media (max-width: 1200px) {
+    /* The wide layout pins the body to the viewport with overflow hidden. Once
+       the grid is allowed to grow past one screen, the document has to be able
+       to scroll or the extra rows are simply clipped. */
+    body {
+        height: auto;
+        min-height: 100vh;
+        overflow-y: auto;
+        overflow-x: hidden;
+    }
+
+    .dashboard-grid,
+    .dashboard-grid.focus-map,
+    .dashboard-grid.focus-emergency,
+    .dashboard-grid.focus-violations,
+    .dashboard-grid.focus-simulator {
+        grid-template-columns: 300px 1fr;
+        height: auto;
+        min-height: calc(100vh - 95px);
+        overflow: visible;
+    }
+
+    .col-left,
+    .col-center,
+    .col-right {
+        height: auto;
+        overflow: visible;
+    }
+
+    /* The tools column spans the full width beneath the map and sidebar. */
+    .col-right {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        align-items: start;
+    }
+
+    /* A map with no fixed parent height needs an explicit one. */
+    .w-map {
+        min-height: 60vh;
+    }
+    .w-vehicles {
+        min-height: 280px;
+    }
+    .w-logs {
+        flex: 0 0 auto;
+        min-height: 200px;
+    }
+    .w-violations {
+        min-height: 320px;
+    }
+
+    /* Focus modes still hide widgets, but no longer restyle the columns. */
+    .dashboard-grid.focus-map .col-right,
+    .dashboard-grid.focus-emergency .col-left,
+    .dashboard-grid.focus-violations .col-left,
+    .dashboard-grid.focus-simulator .col-left {
+        display: none;
+    }
+    .dashboard-grid.focus-emergency .col-center,
+    .dashboard-grid.focus-violations .col-center,
+    .dashboard-grid.focus-simulator .col-center {
+        grid-column: 1 / -1;
+    }
+}
+
+/* Phone / narrow window: single column, everything stacked. */
+@media (max-width: 820px) {
+    .dashboard-grid,
+    .dashboard-grid.focus-map,
+    .dashboard-grid.focus-emergency,
+    .dashboard-grid.focus-violations,
+    .dashboard-grid.focus-simulator {
+        grid-template-columns: 1fr;
+    }
+
+    .col-right {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+
+    .w-map {
+        min-height: 50vh;
+    }
+
+    header.glass-panel {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .nav-tabs {
+        order: 3;
+        width: 100%;
+        overflow-x: auto;
+        /* Keep the tab strip swipeable instead of letting it squash. */
+        flex-wrap: nowrap;
+        scrollbar-width: none;
+    }
+    .nav-tabs::-webkit-scrollbar {
+        display: none;
+    }
+    .tab-btn {
+        white-space: nowrap;
+    }
 }
