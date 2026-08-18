@@ -44,7 +44,8 @@
     "test": "jest",
     "typecheck": "tsc --noEmit",
     "prebuild": "expo prebuild --platform android --clean && node scripts/tune-gradle.mjs",
-    "generate-assets": "node scripts/generate-assets.mjs"
+    "generate-assets": "node scripts/generate-assets.mjs",
+    "apk": "node scripts/build-apk.mjs"
   },
   "private": true,
   "jest": {
