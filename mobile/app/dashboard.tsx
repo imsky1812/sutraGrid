@@ -1,27 +1,29 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import { StatusBar } from 'expo-status-bar';
 import { router, useLocalSearchParams } from 'expo-router';
 import { listMyVehicles, Vehicle } from '../src/vehicles';
 import { setAlertMessage, setDestination, startTelemetry, stopTelemetry } from '../src/telemetry';
 import { fetchRoute } from '../src/directions';
 import { darkMapStyle } from '../src/mapStyle';
+import { AccentAction, Badge, Card, Chip, Field, Label, NavBar, PillButton } from '../src/ui';
+import { color, radius, shadow, space, type } from '../src/theme';
 import type { LatLng } from '../src/polyline';
 
 const BANGALORE = { latitude: 12.9716, longitude: 77.5946 };
 
-const PRESET_DESTINATIONS = [
-  { name: 'City General Hospital', latitude: 12.976, longitude: 77.601 },
-  { name: 'Central Fire Station', latitude: 12.975, longitude: 77.589 },
-  { name: 'Metro Police Headquarters', latitude: 12.969, longitude: 77.591 },
+const PRESETS = [
+  { key: 'hospital', glyph: '🏥', name: 'City General Hospital', latitude: 12.976, longitude: 77.601 },
+  { key: 'fire', glyph: '🚒', name: 'Central Fire Station', latitude: 12.975, longitude: 77.589 },
+  { key: 'police', glyph: '🚓', name: 'Metro Police HQ', latitude: 12.969, longitude: 77.591 },
+];
+
+const NAV_ITEMS = [
+  { key: 'route', glyph: '◎', label: 'Route' },
+  { key: 'manual', glyph: '⌖', label: 'Manual coordinates' },
+  { key: 'alert', glyph: '✦', label: 'Emergency corridor' },
 ];
 
 export default function Dashboard() {
@@ -33,12 +35,14 @@ export default function Dashboard() {
   const [destLat, setDestLat] = useState('');
   const [destLng, setDestLng] = useState('');
   const [destName, setDestName] = useState('');
+  const [activePreset, setActivePreset] = useState<string | null>(null);
   const [alerting, setAlerting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [routing, setRouting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pane, setPane] = useState('route');
 
   const sheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ['24%', '78%'], []);
+  const snapPoints = useMemo(() => ['30%', '82%'], []);
 
   useEffect(() => {
     let active = true;
@@ -50,8 +54,8 @@ export default function Dashboard() {
         if (!active) return;
 
         if (!found) {
-          // RLS means the list only ever contains this user's vehicles, so a
-          // miss here is a bad id rather than a permissions problem.
+          // RLS means the list only ever holds this user's vehicles, so a miss
+          // is a bad id rather than a permissions problem.
           setError('Vehicle not found. It may belong to another account.');
           setLoading(false);
           return;
@@ -76,9 +80,10 @@ export default function Dashboard() {
   }, [vehicleId]);
 
   const applyDestination = useCallback(
-    async (target: { latitude: number; longitude: number; name: string }) => {
+    async (target: { latitude: number; longitude: number; name: string }, presetKey?: string) => {
       setError(null);
       setRouting(true);
+      setActivePreset(presetKey ?? null);
       setDestination(target);
       setDestLat(String(target.latitude));
       setDestLng(String(target.longitude));
@@ -110,6 +115,7 @@ export default function Dashboard() {
     setDestLat('');
     setDestLng('');
     setDestName('');
+    setActivePreset(null);
     setDestination(null);
   }
 
@@ -121,15 +127,19 @@ export default function Dashboard() {
     );
   }
 
-  if (loading) return <ActivityIndicator style={styles.centred} />;
+  if (loading) {
+    return (
+      <View style={[styles.screen, styles.centre]}>
+        <ActivityIndicator color={color.accent} />
+      </View>
+    );
+  }
 
   if (!vehicle) {
     return (
-      <View style={styles.centredBox}>
+      <View style={[styles.screen, styles.centre, { padding: space.xl, gap: space.lg }]}>
         <Text style={styles.error}>{error ?? 'Vehicle not found.'}</Text>
-        <Pressable style={styles.button} onPress={() => router.replace('/vehicle-setup')}>
-          <Text style={styles.buttonText}>Back to vehicles</Text>
-        </Pressable>
+        <PillButton label="Back to vehicles" onPress={() => router.replace('/vehicle-setup')} />
       </View>
     );
   }
@@ -137,104 +147,163 @@ export default function Dashboard() {
   const hasDestination = destLat !== '' && destLng !== '';
 
   return (
-    <View style={styles.container}>
+    <View style={styles.screen}>
+      <StatusBar style="light" />
+
       <MapView
         style={StyleSheet.absoluteFill}
         customMapStyle={darkMapStyle}
         showsUserLocation
+        showsMyLocationButton={false}
         initialRegion={{ ...BANGALORE, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
       >
+        {/* The route is the only saturated thing on the map, by design. */}
         {route.length > 0 && (
-          <Polyline coordinates={route} strokeColor="#00f2fe" strokeWidth={6} />
+          <Polyline coordinates={route} strokeColor={color.accent} strokeWidth={5} />
         )}
         {hasDestination && (
           <Marker
             coordinate={{ latitude: Number(destLat), longitude: Number(destLng) }}
             title={destName || 'Destination'}
+            pinColor={color.accent}
           />
         )}
       </MapView>
 
-      <BottomSheet ref={sheetRef} index={0} snapPoints={snapPoints}>
+      {/* Floating status bar, echoing the reference's top search pill. */}
+      <View style={styles.topBar}>
+        <View style={styles.statusPill}>
+          <View style={styles.liveDot} />
+          <View style={styles.flex}>
+            <Text style={styles.statusVehicle} numberOfLines={1}>
+              {vehicle.vehicle_number}
+            </Text>
+            <Text style={styles.statusMeta} numberOfLines={1}>
+              Streaming every {vehicle.is_emergency_authorized ? '1s' : '3s'}
+            </Text>
+          </View>
+        </View>
+        <AccentAction
+          glyph="⏻"
+          label="Stop streaming and choose another vehicle"
+          onPress={async () => {
+            await stopTelemetry();
+            router.replace('/vehicle-setup');
+          }}
+        />
+      </View>
+
+      <BottomSheet
+        ref={sheetRef}
+        index={0}
+        snapPoints={snapPoints}
+        backgroundStyle={styles.sheetBg}
+        handleIndicatorStyle={styles.sheetHandle}
+      >
         <BottomSheetScrollView contentContainerStyle={styles.sheet}>
-          <Text style={styles.title}>{vehicle.vehicle_number}</Text>
-          <Text style={styles.muted}>
-            {vehicle.driver_name} · {vehicle.vehicle_type}
-            {vehicle.is_emergency_authorized ? ' · EMERGENCY AUTHORIZED' : ''}
-          </Text>
-          <Text style={styles.muted}>
-            Streaming every {vehicle.is_emergency_authorized ? '1' : '3'}s while on duty.
-          </Text>
+          <View style={styles.sheetHeader}>
+            <View style={styles.flex}>
+              {vehicle.is_emergency_authorized ? (
+                <Badge label="Emergency authorized" live />
+              ) : (
+                <Badge label={vehicle.vehicle_type} />
+              )}
+              <Text style={styles.sheetTitle}>
+                {destName || 'No destination set'}
+              </Text>
+              <Text style={type.muted}>
+                {route.length > 0
+                  ? `Route loaded · ${route.length} points`
+                  : 'Pick a destination to draw a corridor.'}
+              </Text>
+            </View>
+          </View>
+
+          <NavBar items={NAV_ITEMS} activeKey={pane} onSelect={setPane} />
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
-          <Text style={styles.section}>Destination</Text>
-          <View style={styles.presetRow}>
-            {PRESET_DESTINATIONS.map((d) => (
-              <Pressable key={d.name} style={styles.chip} onPress={() => applyDestination(d)}>
-                <Text style={styles.chipText}>{d.name}</Text>
-              </Pressable>
-            ))}
-          </View>
-
-          <View style={styles.row}>
-            <TextInput
-              style={[styles.input, styles.flex]}
-              placeholder="Lat"
-              placeholderTextColor="#999"
-              keyboardType="numeric"
-              value={destLat}
-              onChangeText={setDestLat}
-            />
-            <TextInput
-              style={[styles.input, styles.flex]}
-              placeholder="Lng"
-              placeholderTextColor="#999"
-              keyboardType="numeric"
-              value={destLng}
-              onChangeText={setDestLng}
-            />
-          </View>
-
-          <Pressable
-            style={[styles.button, routing && styles.disabled]}
-            onPress={applyTypedDestination}
-            disabled={routing}
-          >
-            <Text style={styles.buttonText}>{routing ? 'Routing…' : 'Set destination'}</Text>
-          </Pressable>
-
-          {hasDestination ? (
-            <Pressable style={[styles.button, styles.secondary]} onPress={clearRoute}>
-              <Text style={styles.buttonText}>Clear route</Text>
-            </Pressable>
+          {pane === 'route' ? (
+            <View style={styles.pane}>
+              <Label>Frequent destinations</Label>
+              <View style={styles.chipRow}>
+                {PRESETS.map((p) => (
+                  <Chip
+                    key={p.key}
+                    glyph={p.glyph}
+                    label={p.name}
+                    selected={activePreset === p.key}
+                    onPress={() => applyDestination(p, p.key)}
+                  />
+                ))}
+              </View>
+              {routing ? <Text style={type.muted}>Finding a route…</Text> : null}
+              {hasDestination ? (
+                <PillButton label="Clear route" variant="surface" onPress={clearRoute} />
+              ) : null}
+            </View>
           ) : null}
 
-          {/* Offered only when an administrator has authorized this vehicle,
-              rather than shown and then refused. */}
-          {vehicle.is_emergency_authorized ? (
-            <>
-              <Text style={styles.section}>Emergency corridor</Text>
-              <Pressable
-                style={[styles.button, alerting ? styles.danger : styles.secondary]}
-                onPress={toggleAlert}
-              >
-                <Text style={styles.buttonText}>
-                  {alerting ? 'Cancel Clear-Path Broadcast' : 'Broadcast Emergency Clear-Path'}
-                </Text>
-              </Pressable>
-            </>
+          {pane === 'manual' ? (
+            <View style={styles.pane}>
+              <Label>Coordinates</Label>
+              <View style={styles.row}>
+                <Field
+                  style={styles.flex}
+                  placeholder="Latitude"
+                  keyboardType="numeric"
+                  value={destLat}
+                  onChangeText={setDestLat}
+                />
+                <Field
+                  style={styles.flex}
+                  placeholder="Longitude"
+                  keyboardType="numeric"
+                  value={destLng}
+                  onChangeText={setDestLng}
+                />
+              </View>
+              <PillButton
+                label="Set destination"
+                glyph="✦"
+                busy={routing}
+                onPress={applyTypedDestination}
+              />
+            </View>
           ) : null}
 
-          <Pressable
-            style={[styles.button, styles.secondary]}
-            onPress={async () => {
-              await stopTelemetry();
-              router.replace('/vehicle-setup');
-            }}
-          >
-            <Text style={styles.buttonText}>Stop streaming</Text>
-          </Pressable>
+          {pane === 'alert' ? (
+            <View style={styles.pane}>
+              {/* Offered only when an administrator has authorized this vehicle,
+                  rather than shown and then refused. */}
+              {vehicle.is_emergency_authorized ? (
+                <>
+                  <Label>Corridor broadcast</Label>
+                  <Text style={type.muted}>
+                    Tells traffic control this vehicle needs a clear path. Stays on until
+                    you cancel it.
+                  </Text>
+                  <PillButton
+                    label={
+                      alerting
+                        ? 'Cancel Clear-Path Broadcast'
+                        : 'Broadcast Emergency Clear-Path'
+                    }
+                    variant={alerting ? 'danger' : 'accent'}
+                    onPress={toggleAlert}
+                  />
+                </>
+              ) : (
+                <Card style={styles.locked}>
+                  <Text style={type.section}>Not authorized</Text>
+                  <Text style={type.muted}>
+                    Corridor broadcasts are limited to vehicles an administrator has
+                    authorized.
+                  </Text>
+                </Card>
+              )}
+            </View>
+          ) : null}
         </BottomSheetScrollView>
       </BottomSheet>
     </View>
@@ -242,29 +311,46 @@ export default function Dashboard() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  centred: { flex: 1 },
-  centredBox: { flex: 1, justifyContent: 'center', padding: 24, gap: 12 },
-  sheet: { padding: 16, gap: 10, paddingBottom: 40 },
-  title: { fontSize: 20, fontWeight: '700' },
-  section: { fontSize: 15, fontWeight: '700', marginTop: 10 },
-  muted: { color: '#666', fontSize: 12 },
-  row: { flexDirection: 'row', gap: 8 },
+  screen: { flex: 1, backgroundColor: color.canvas },
+  centre: { alignItems: 'center', justifyContent: 'center' },
   flex: { flex: 1 },
-  presetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  chip: {
-    borderWidth: 1,
-    borderColor: '#0b6bcb',
-    borderRadius: 16,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+
+  topBar: {
+    position: 'absolute',
+    top: space.xxl + space.xl,
+    left: space.lg,
+    right: space.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
   },
-  chipText: { color: '#0b6bcb', fontSize: 12 },
-  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12 },
-  button: { backgroundColor: '#0b6bcb', borderRadius: 8, padding: 14, alignItems: 'center' },
-  secondary: { backgroundColor: '#555' },
-  danger: { backgroundColor: '#c0392b' },
-  disabled: { opacity: 0.6 },
-  buttonText: { color: '#fff', fontWeight: '600' },
-  error: { color: '#c0392b', fontSize: 13 },
+  statusPill: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    backgroundColor: color.surface,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: color.line,
+    paddingHorizontal: space.lg,
+    paddingVertical: 10,
+    ...shadow.float,
+  },
+  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: color.accent },
+  statusVehicle: { color: color.ink, fontSize: 14, fontWeight: '700', letterSpacing: -0.2 },
+  statusMeta: { color: color.muted, fontSize: 11 },
+
+  sheetBg: { backgroundColor: color.surface, borderRadius: radius.sheet },
+  sheetHandle: { backgroundColor: color.faint, width: 40 },
+  sheet: { padding: space.xl, paddingBottom: space.xxl + space.xl, gap: space.lg },
+  sheetHeader: { flexDirection: 'row', gap: space.md },
+  sheetTitle: { ...type.title, fontSize: 21, marginTop: space.sm },
+
+  pane: { gap: space.md },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  row: { flexDirection: 'row', gap: space.sm },
+  locked: { gap: space.sm, backgroundColor: color.surfaceHigh },
+
+  error: { color: color.danger, fontSize: 13 },
 });

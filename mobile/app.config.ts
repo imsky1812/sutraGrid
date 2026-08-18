@@ -12,7 +12,9 @@ const config: ExpoConfig = {
   orientation: 'portrait',
   icon: './assets/icon.png',
   scheme: 'sutra',
-  userInterfaceStyle: 'light',
+  // The app is dark-only by design; a light system theme would fight the map.
+  userInterfaceStyle: 'dark',
+  backgroundColor: '#0D0F0B',
 
   ios: {
     supportsTablet: true,
@@ -52,6 +54,17 @@ const config: ExpoConfig = {
   plugins: [
     'expo-router',
     'expo-secure-store',
+    'expo-system-ui',
+    [
+      'expo-splash-screen',
+      {
+        // The mark on the app canvas, so launch and first screen are continuous.
+        image: './assets/splash-icon.png',
+        imageWidth: 180,
+        resizeMode: 'contain',
+        backgroundColor: '#0D0F0B',
+      },
+    ],
     [
       'expo-location',
       {

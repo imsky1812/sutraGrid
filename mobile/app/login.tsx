@@ -1,16 +1,17 @@
 import { useState } from 'react';
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
+  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
 import { supabase } from '../src/supabase';
+import { Badge, Field, Label, PillButton } from '../src/ui';
+import { color, space, type } from '../src/theme';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -23,8 +24,8 @@ export default function Login() {
     setError(null);
     setNotice(null);
 
-    if (!email.trim()) return setError('Email is required.');
-    if (password.length < 6) return setError('Password must be at least 6 characters.');
+    if (!email.trim()) return setError('Enter the email your fleet account uses.');
+    if (password.length < 6) return setError('Passwords are at least 6 characters.');
 
     setBusy(true);
     const credentials = { email: email.trim(), password };
@@ -34,90 +35,87 @@ export default function Login() {
         : await supabase.auth.signUp(credentials);
     setBusy(false);
 
-    if (authError) {
-      setError(authError.message);
-      return;
-    }
+    if (authError) return setError(authError.message);
 
-    // With email confirmation enabled, signUp returns a user but no session.
-    // Routing on to the dashboard here would land on an unauthenticated screen.
-    if (!data.session) {
-      setNotice('Check your email to confirm the account, then sign in.');
-      return;
-    }
+    // With email confirmation on, signUp returns a user but no session. Routing
+    // onward would land on a screen the driver is not signed in for.
+    if (!data.session) return setNotice('Confirm your email, then sign in.');
 
     router.replace('/vehicle-setup');
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <Text style={styles.title}>SUTRA Vehicle Client</Text>
-      <Text style={styles.subtitle}>Sign in to start streaming telemetry.</Text>
-
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
-        placeholderTextColor="#999"
-        autoCapitalize="none"
-        autoComplete="email"
-        keyboardType="email-address"
-        textContentType="emailAddress"
-        value={email}
-        onChangeText={setEmail}
-        editable={!busy}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        placeholderTextColor="#999"
-        secureTextEntry
-        autoComplete="current-password"
-        textContentType="password"
-        value={password}
-        onChangeText={setPassword}
-        editable={!busy}
-      />
-
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      {notice ? <Text style={styles.notice}>{notice}</Text> : null}
-
-      <Pressable
-        style={[styles.button, busy && styles.buttonDisabled]}
-        onPress={() => submit('signIn')}
-        disabled={busy}
+    <View style={styles.screen}>
+      <StatusBar style="light" />
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {busy ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Sign in</Text>
-        )}
-      </Pressable>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <View style={styles.header}>
+            <Badge label="Vehicle client" live />
+            <Text style={type.display}>
+              Live telemetry,{'\n'}
+              <Text style={type.displayAccent}>straight from the road</Text>
+            </Text>
+            <Text style={type.muted}>
+              Your position streams to traffic control only while a vehicle is on duty.
+            </Text>
+          </View>
 
-      <Pressable onPress={() => submit('signUp')} disabled={busy}>
-        <Text style={styles.link}>Create an account</Text>
-      </Pressable>
-    </KeyboardAvoidingView>
+          <View style={styles.form}>
+            <Label>Email</Label>
+            <Field
+              placeholder="driver@example.com"
+              autoCapitalize="none"
+              autoComplete="email"
+              keyboardType="email-address"
+              textContentType="emailAddress"
+              value={email}
+              onChangeText={setEmail}
+              editable={!busy}
+            />
+
+            <View style={styles.gap} />
+
+            <Label>Password</Label>
+            <Field
+              placeholder="At least 6 characters"
+              secureTextEntry
+              autoComplete="current-password"
+              textContentType="password"
+              value={password}
+              onChangeText={setPassword}
+              editable={!busy}
+            />
+          </View>
+
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {notice ? <Text style={styles.notice}>{notice}</Text> : null}
+
+          <View style={styles.actions}>
+            <PillButton label="Sign in" glyph="✦" busy={busy} onPress={() => submit('signIn')} />
+            <PillButton
+              label="Create an account"
+              variant="surface"
+              disabled={busy}
+              onPress={() => submit('signUp')}
+            />
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', padding: 24, gap: 12, backgroundColor: '#fff' },
-  title: { fontSize: 26, fontWeight: '700', textAlign: 'center' },
-  subtitle: { fontSize: 13, color: '#666', textAlign: 'center', marginBottom: 16 },
-  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 14, fontSize: 16 },
-  button: {
-    backgroundColor: '#0b6bcb',
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  buttonDisabled: { opacity: 0.6 },
-  buttonText: { color: '#fff', fontWeight: '600', fontSize: 16 },
-  link: { textAlign: 'center', color: '#0b6bcb', padding: 8 },
-  error: { color: '#c0392b', fontSize: 13 },
-  notice: { color: '#1e7a3c', fontSize: 13 },
+  screen: { flex: 1, backgroundColor: color.canvas },
+  flex: { flex: 1 },
+  content: { flexGrow: 1, justifyContent: 'center', padding: space.xl, gap: space.xl },
+  header: { gap: space.md },
+  form: { gap: space.sm },
+  gap: { height: space.md },
+  actions: { gap: space.md },
+  error: { color: color.danger, fontSize: 13 },
+  notice: { color: color.success, fontSize: 13 },
 });

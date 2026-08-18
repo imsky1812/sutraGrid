@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
 const mockStartTelemetry = jest.fn().mockResolvedValue(undefined);
 const mockStopTelemetry = jest.fn().mockResolvedValue(undefined);
@@ -86,17 +86,26 @@ describe('Dashboard', () => {
     await waitFor(() => expect(screen.getByText('KA-03-AB-1234')).toBeTruthy());
   });
 
+  // The corridor control lives behind its own pane, so these open it the way a
+  // driver would rather than asserting against the default view.
+  const openCorridorPane = async () => {
+    await waitFor(() => expect(screen.getByLabelText('Emergency corridor')).toBeTruthy());
+    fireEvent.press(screen.getByLabelText('Emergency corridor'));
+  };
+
   // A vehicle an administrator has not authorized must not be offered the
   // control at all, rather than being offered it and refused later.
   it('hides emergency controls for a vehicle without authorization', async () => {
     await render(<Dashboard />);
-    await waitFor(() => expect(screen.getByText('KA-03-AB-1234')).toBeTruthy());
+    await openCorridorPane();
+    await waitFor(() => expect(screen.getByText(/Not authorized/i)).toBeTruthy());
     expect(screen.queryByText(/Broadcast Emergency/i)).toBeNull();
   });
 
   it('shows emergency controls for an authorized vehicle', async () => {
     mockListMyVehicles.mockResolvedValue([vehicle({ is_emergency_authorized: true })]);
     await render(<Dashboard />);
+    await openCorridorPane();
     await waitFor(() => expect(screen.getByText(/Broadcast Emergency/i)).toBeTruthy());
   });
 
