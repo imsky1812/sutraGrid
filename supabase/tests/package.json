@@ -1,0 +1,12 @@
+{
+  "name": "sutra-schema-tests",
+  "private": true,
+  "type": "module",
+  "description": "Schema and RLS tests run against PGlite, so no Docker or hosted database is needed.",
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.5"
+  }
+}

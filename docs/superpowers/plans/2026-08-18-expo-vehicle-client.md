@@ -19,7 +19,18 @@
 - **Never commit generated output:** `mobile/node_modules/`, `mobile/android/`, `mobile/ios/`, `mobile/.expo/`. Ignore rules land in Task 3, before the first build.
 - **The client never sends an emergency flag.** `vehicle_positions` has no such column. Any task that adds one is wrong.
 - **Telemetry cadence:** 1000 ms when the vehicle is emergency-authorized, 3000 ms otherwise.
-- **Docker Desktop must be running** for Tasks 1, 2 and 8 (local Supabase stack). It is installed; the daemon is currently stopped.
+- **No Docker.** The user declined it, so `supabase start` / `supabase test db` are
+  unavailable. Schema tests run against **PGlite** (`@electric-sql/pglite@0.5.5`,
+  Postgres 18.3 in WASM) via Node's built-in `node:test`. Verified working:
+  roles, RLS policies, `request.jwt.claims`, and plpgsql triggers all enforce
+  correctly.
+  **Limitation:** the `auth` schema is a stub matching Supabase's shape, not
+  Supabase's own. Policy logic is genuinely tested; the runtime is not. The same
+  migration files are pushed to the hosted project in Task 10, which is where
+  that gets confirmed.
+- **Migrations must run on both PGlite and Supabase.** Anything Supabase-specific
+  (for example `alter publication supabase_realtime`) has to be guarded so it is
+  skipped when the object is absent.
 - **Google Maps and Directions keys are not yet available.** Tasks 1-9 must not block on them. Only Task 10's on-device map render requires the Maps key.
 
 ---
