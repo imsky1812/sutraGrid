@@ -1,1023 +1,799 @@
-// SUTRA operator dashboard.
+// SUTRA control console.
 //
-// Rendering rule for this file: telemetry arrives from the network and is
-// therefore untrusted. Nothing from a payload is ever concatenated into an HTML
-// string or an inline attribute. Use el(), text nodes, and addEventListener.
+// One interface for both roles. What differs is scope, not layout: row-level
+// security decides whether the fleet list holds every vehicle or only your own,
+// and the same account signs in here and in the mobile app.
+//
+// Operators additionally get the alert composer. That is the single
+// role-conditional piece of UI in this file.
+//
+// Rendering rule: telemetry and alert text are untrusted input. Nothing from a
+// payload is ever concatenated into HTML or an inline attribute.
+
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.112.3';
+import maplibregl from 'https://esm.sh/maplibre-gl@5.6.1';
 
 const CONFIG = window.SUTRA_CONFIG || {};
+const MAP_STYLE = 'https://tiles.openfreemap.org/styles/dark';
+const STALE_AFTER_MS = 30_000;
+const MAX_LOG_ITEMS = 150;
+const HISTORY_DAYS = 7;
 
-let map;
-const vehicleMarkers = new Map();
-const routePolylines = new Map();
-const bypassPolylines = new Map();
-const congestionCircles = new Map();
+const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
 
-let wsConnection;          // dashboard subscriber socket
-let simSocket = null;      // simulator's own vehicle socket
-let reconnectTimer = null;
+const TYPE_GLYPH = { NORMAL: '\u{1F697}', AMBULANCE: '\u{1F691}', POLICE: '\u{1F693}', FIRE: '\u{1F692}' };
 
-// State management
-let activeVehicles = new Map();
-let selectedVehicleId = null;
-let speedingViolationsCount = 0;
+const state = {
+  isOperator: false,
+  speedLimit: 80,
+  fleet: new Map(), // vehicle_id -> { position, vehicle, marker }
+  violations: 0,
+  filter: 'all',
+  sort: 'plate',
+  query: '',
+  selectedId: null,
+  map: null,
+  historyLayerIds: [],
+};
 
-// Speeding is logged once per episode, not once per frame. Telemetry arrives at
-// 1 Hz, so counting every frame turned a single vehicle speeding for a minute
-// into 60 "tickets" and made the counter meaningless.
-const SPEED_LIMIT_KMH = 80;
-// A vehicle must drop this far below the limit before a new episode can start,
-// so hovering at 80 km/h does not flap the counter.
-const SPEED_CLEAR_KMH = 75;
-const speedingVehicles = new Set();
+const $ = (id) => document.getElementById(id);
 
-// Cap on rendered log entries. The feed previously grew without bound.
-const MAX_LOG_ITEMS = 200;
-let simulationInterval = null;
-let simIndex = 0;
-let isSimulating = false;
-let isGlobalOptimizerActive = false;
-
-// Predefined Dark Theme Styles for Google Maps
-const darkMapStyle = [
-    { elementType: "geometry", stylers: [{ color: "#0b0f19" }] },
-    { elementType: "labels.text.stroke", stylers: [{ color: "#0b0f19" }] },
-    { elementType: "labels.text.fill", stylers: [{ color: "#7b8a9b" }] },
-    {
-        featureType: "administrative",
-        elementType: "geometry.stroke",
-        stylers: [{ color: "#1f293d" }]
-    },
-    {
-        featureType: "landscape.natural",
-        elementType: "geometry",
-        stylers: [{ color: "#0d1324" }]
-    },
-    {
-        featureType: "poi",
-        elementType: "geometry",
-        stylers: [{ color: "#0d1324" }]
-    },
-    {
-        featureType: "poi",
-        elementType: "labels.text.fill",
-        stylers: [{ color: "#4b5b75" }]
-    },
-    {
-        featureType: "road",
-        elementType: "geometry",
-        stylers: [{ color: "#161d30" }]
-    },
-    {
-        featureType: "road",
-        elementType: "geometry.stroke",
-        stylers: [{ color: "#0d1324" }]
-    },
-    {
-        featureType: "road",
-        elementType: "labels.text.fill",
-        stylers: [{ color: "#8a9ab0" }]
-    },
-    {
-        featureType: "road.highway",
-        elementType: "geometry",
-        stylers: [{ color: "#1f2d47" }]
-    },
-    {
-        featureType: "road.highway",
-        elementType: "geometry.stroke",
-        stylers: [{ color: "#0f1826" }]
-    },
-    {
-        featureType: "transit",
-        elementType: "geometry",
-        stylers: [{ color: "#0e1526" }]
-    },
-    {
-        featureType: "water",
-        elementType: "geometry",
-        stylers: [{ color: "#05070d" }]
-    }
-];
-
-// ---------------------------------------------------------------------------
-// Safe DOM helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Create an element. `props.text` is set via textContent, never innerHTML, so
- * any value passed here is inert regardless of what it contains.
- */
 function el(tag, props = {}, children = []) {
-    const node = document.createElement(tag);
-    if (props.className) node.className = props.className;
-    if (props.id) node.id = props.id;
-    if (props.text !== undefined) node.textContent = String(props.text);
-    if (props.style) Object.assign(node.style, props.style);
-    for (const child of children) {
-        if (child) node.appendChild(child);
-    }
-    return node;
+  const node = document.createElement(tag);
+  if (props.className) node.className = props.className;
+  if (props.text !== undefined) node.textContent = String(props.text);
+  if (props.type) node.type = props.type;
+  if (props.placeholder) node.placeholder = props.placeholder;
+  if (props.href) node.href = props.href;
+  if (props.style) Object.assign(node.style, props.style);
+  for (const child of children) if (child) node.appendChild(child);
+  return node;
 }
 
-function clear(node) {
-    while (node.firstChild) node.removeChild(node.firstChild);
-}
+const clear = (node) => {
+  while (node.firstChild) node.removeChild(node.firstChild);
+};
 
-// A labelled value pair, e.g. "Driver: Amit Sharma" with the value in bold.
-function labelled(label, value, valueClass) {
-    return el("span", {}, [
-        document.createTextNode(label + " "),
-        el("strong", { text: value, className: valueClass || "" })
-    ]);
-}
-
-function numberOr(value, fallback) {
-    return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
+const num = (v, f = 0) => (typeof v === 'number' && Number.isFinite(v) ? v : f);
+const plate = (entry) => entry.vehicle?.vehicle_number ?? '—';
+const glyph = (entry) => TYPE_GLYPH[entry.vehicle?.vehicle_type] ?? TYPE_GLYPH.NORMAL;
+const isStale = (entry) => Date.now() - new Date(entry.position.updated_at).getTime() > STALE_AFTER_MS;
 
 // ---------------------------------------------------------------------------
-// Bootstrap
+// Auth
 // ---------------------------------------------------------------------------
 
-// The Maps library is injected at runtime so the API key lives in config.js
-// (gitignored) rather than in the committed HTML.
-function loadGoogleMaps() {
-    if (!CONFIG.MAPS_API_KEY || CONFIG.MAPS_API_KEY.startsWith("REPLACE_")) {
-        showBootError(
-            "Google Maps API key missing. Copy admin-dashboard/config.example.js " +
-            "to config.js and set MAPS_API_KEY."
-        );
-        return;
-    }
-    const script = document.createElement("script");
-    script.src =
-        "https://maps.googleapis.com/maps/api/js?key=" +
-        encodeURIComponent(CONFIG.MAPS_API_KEY) +
-        "&libraries=geometry&callback=initMap";
-    script.async = true;
-    script.defer = true;
-    script.onerror = () => showBootError("Failed to load the Google Maps library.");
-    document.head.appendChild(script);
+function gateError(message) {
+  const node = $('gate-error');
+  node.textContent = message;
+  node.hidden = false;
 }
 
-function showBootError(message) {
-    const mapEl = document.getElementById("map");
-    if (mapEl) {
-        clear(mapEl);
-        mapEl.appendChild(
-            el("div", {
-                text: message,
-                style: {
-                    padding: "24px",
-                    color: "#ff4d5a",
-                    fontFamily: "monospace",
-                    fontSize: "13px",
-                    lineHeight: "1.6"
-                }
-            })
-        );
-    }
-    logSystemMessage(message, "error");
+/** RLS makes this row visible only to the caller, so an empty result means
+ *  "not an operator" rather than "no operators exist". */
+async function checkOperator() {
+  const { data, error } = await supabase.from('operators').select('user_id').limit(1);
+  return !error && (data ?? []).length > 0;
 }
 
-// Initialize Google Maps
-function initMap() {
-    map = new google.maps.Map(document.getElementById("map"), {
-        center: { lat: 12.9716, lng: 77.5946 }, // Bangalore
-        zoom: 14,
-        styles: darkMapStyle,
-        disableDefaultUI: false,
-        zoomControl: true,
-        mapTypeControl: false,
-        streetViewControl: false
-    });
+async function enterConsole() {
+  state.isOperator = await checkOperator();
 
-    logSystemMessage("Google Map initialized with cyber-dark control theme.");
-    connectWebSocket();
+  const { data: limitRow } = await supabase
+    .from('settings').select('value').eq('key', 'speed_limit_kmh').maybeSingle();
+  if (limitRow) state.speedLimit = Number(limitRow.value) || 80;
+
+  $('gate').hidden = true;
+  $('console').hidden = false;
+  $('events-label').textContent = state.isOperator ? 'Fleet events' : 'My events';
+  await startConsole();
 }
 
-// ---------------------------------------------------------------------------
-// WebSocket Connection Management
-// ---------------------------------------------------------------------------
-
-function backendHost() {
-    return CONFIG.BACKEND_HOST || "localhost:3000";
-}
-
-// The dashboard is a subscriber. It authenticates with the operator key and
-// connects to /dashboard/stream, which is a separate endpoint from the one
-// vehicles publish on — so the dashboard can never register itself as a vehicle.
-function connectWebSocket() {
-    if (!CONFIG.OPERATOR_KEY) {
-        showBootError("OPERATOR_KEY missing from config.js. Cannot subscribe to telemetry.");
-        return;
-    }
-
-    const wsUrl =
-        "ws://" + backendHost() + "/dashboard/stream?key=" + encodeURIComponent(CONFIG.OPERATOR_KEY);
-    updateConnectionUI(false, "CONNECTING...");
-
-    wsConnection = new WebSocket(wsUrl);
-
-    wsConnection.onopen = () => {
-        updateConnectionUI(true, "CONNECTED");
-        logSystemMessage("Telemetry WebSocket stream connected successfully.");
-    };
-
-    wsConnection.onclose = (event) => {
-        updateConnectionUI(false, "DISCONNECTED");
-        // 1006 with no prior open is the browser's report of a rejected upgrade,
-        // which for this endpoint means the operator key was refused.
-        if (event.code === 1006) {
-            logSystemMessage(
-                "Stream closed. If this repeats, check that OPERATOR_KEY in config.js " +
-                "matches backend-mock/.env. Retrying in 3s...",
-                "error"
-            );
-        } else {
-            logSystemMessage("WebSocket stream disconnected. Retrying in 3s...", "error");
-        }
-        clearTimeout(reconnectTimer);
-        reconnectTimer = setTimeout(connectWebSocket, 3000);
-    };
-
-    wsConnection.onerror = () => {
-        logSystemMessage("WebSocket connection error. Checking server status...", "error");
-    };
-
-    wsConnection.onmessage = (event) => {
-        try {
-            const payload = JSON.parse(event.data);
-            handleTelemetryMessage(payload);
-        } catch (e) {
-            console.error("Error parsing WS message:", e);
-        }
-    };
-}
-
-// Handle incoming WebSocket messages
-function handleTelemetryMessage(payload) {
-    if (!payload || typeof payload !== "object") return;
-
-    if (payload.type === "UPDATE") {
-        const vehicle = payload.data;
-        // The server validates before broadcasting, but the dashboard does not
-        // assume that: a shape check here keeps one bad frame from taking the
-        // whole render path down.
-        if (!vehicle || typeof vehicle.vehicleId !== "string") return;
-        if (!Number.isFinite(vehicle.lat) || !Number.isFinite(vehicle.lng)) return;
-        vehicle.speed = numberOr(vehicle.speed, 0);
-
-        activeVehicles.set(vehicle.vehicleId, vehicle);
-
-        updateVehicleOnMap(vehicle);
-        updateVehicleList();
-        updateSystemAnalytics();
-
-        // Rules check: log the transition into a speeding episode, not each
-        // frame spent in one.
-        if (vehicle.speed > SPEED_LIMIT_KMH) {
-            if (!speedingVehicles.has(vehicle.vehicleId)) {
-                speedingVehicles.add(vehicle.vehicleId);
-                logSpeedViolation(vehicle);
-            }
-        } else if (vehicle.speed < SPEED_CLEAR_KMH) {
-            speedingVehicles.delete(vehicle.vehicleId);
-        }
-
-        // Alerts check: Emergency message
-        if (vehicle.isEmergency && vehicle.alertMessage) {
-            triggerEmergencyBanner(vehicle);
-            logEmergencyAlert(vehicle);
-        }
-    } else if (payload.type === "DISCONNECT") {
-        const vehicleId = payload.vehicleId;
-        if (typeof vehicleId !== "string") return;
-        removeVehicleFromMap(vehicleId);
-        activeVehicles.delete(vehicleId);
-        speedingVehicles.delete(vehicleId);
-        if (selectedVehicleId === vehicleId) selectedVehicleId = null;
-        updateVehicleList();
-        updateSystemAnalytics();
-        logSystemMessage("Vehicle " + vehicleId + " disconnected from network.");
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Map rendering
-// ---------------------------------------------------------------------------
-
-function updateVehicleOnMap(vehicle) {
-    if (!map) return;
-    const position = { lat: vehicle.lat, lng: vehicle.lng };
-
-    const markerColor = vehicle.isEmergency ? "red" : "green";
-    const iconUrl = `https://maps.google.com/mapfiles/ms/icons/${markerColor}-dot.png`;
-
-    // 1. Vehicle Marker
-    if (vehicleMarkers.has(vehicle.vehicleId)) {
-        const marker = vehicleMarkers.get(vehicle.vehicleId);
-        marker.setPosition(position);
-
-        if (selectedVehicleId === vehicle.vehicleId) {
-            map.panTo(position);
-        }
-    } else {
-        const marker = new google.maps.Marker({
-            position: position,
-            map: map,
-            title: `${vehicle.driverName} (${vehicle.vehicleId})`,
-            icon: iconUrl
-        });
-
-        // InfoWindow content is built as a DOM node rather than an HTML string,
-        // so a driver name containing markup renders as literal text.
-        const infoContent = el("div", {
-            style: { color: "#0b0f19", fontFamily: "sans-serif", fontSize: "13px" }
-        });
-        const infoSpeed = el("div");
-        infoContent.appendChild(labelled("Driver:", vehicle.driverName));
-        infoContent.appendChild(el("br"));
-        infoContent.appendChild(labelled("ID:", vehicle.vehicleId));
-        infoContent.appendChild(el("br"));
-        infoContent.appendChild(infoSpeed);
-        infoContent.appendChild(
-            labelled("Status:", vehicle.isEmergency ? "EMERGENCY" : "NORMAL")
-        );
-
-        const infoWindow = new google.maps.InfoWindow({ content: infoContent });
-
-        marker.addListener("click", () => {
-            // Refresh the speed line from current state each time it opens.
-            const current = activeVehicles.get(vehicle.vehicleId) || vehicle;
-            clear(infoSpeed);
-            infoSpeed.appendChild(labelled("Speed:", current.speed.toFixed(1) + " km/h"));
-            infoWindow.open(map, marker);
-            selectVehicleCard(vehicle.vehicleId);
-        });
-
-        vehicleMarkers.set(vehicle.vehicleId, marker);
-        logSystemMessage(
-            "New vehicle connected: " + vehicle.vehicleId + " [" + vehicle.type + "]"
-        );
-    }
-
-    // 2. Active Routing Polyline (if destination set)
-    // NOTE (mock): a straight line to the destination, not a road-following
-    // route. The road geometry lives in the Android client's Directions call.
-    if (Number.isFinite(vehicle.destinationLat) && Number.isFinite(vehicle.destinationLng)) {
-        const pathCoordinates = [
-            position,
-            { lat: vehicle.destinationLat, lng: vehicle.destinationLng }
-        ];
-
-        if (routePolylines.has(vehicle.vehicleId)) {
-            routePolylines.get(vehicle.vehicleId).setPath(pathCoordinates);
-        } else {
-            const polyline = new google.maps.Polyline({
-                path: pathCoordinates,
-                geodesic: true,
-                strokeColor: vehicle.isEmergency ? "#ff4d5a" : "#00f2fe",
-                strokeOpacity: 0.8,
-                strokeWeight: 6,
-                map: map
-            });
-            routePolylines.set(vehicle.vehicleId, polyline);
-        }
-    } else {
-        if (routePolylines.has(vehicle.vehicleId)) {
-            routePolylines.get(vehicle.vehicleId).setMap(null);
-            routePolylines.delete(vehicle.vehicleId);
-        }
-    }
-
-    // 3. Congestion zone.
-    // NOTE (mock): this is a single-vehicle speed threshold, not congestion
-    // detection. One vehicle stopped at a red light will trigger it.
-    if (!vehicle.isEmergency && vehicle.speed < 15 && vehicle.speed > 0) {
-        if (congestionCircles.has(vehicle.vehicleId)) {
-            congestionCircles.get(vehicle.vehicleId).setCenter(position);
-        } else {
-            const circle = new google.maps.Circle({
-                strokeColor: "#ff4d5a",
-                strokeOpacity: 0.5,
-                strokeWeight: 1,
-                fillColor: "#ff4d5a",
-                fillOpacity: 0.25,
-                map: map,
-                center: position,
-                radius: 200 // 200 meters
-            });
-            congestionCircles.set(vehicle.vehicleId, circle);
-            logSystemMessage(
-                "[MOCK] Low-speed flag (single-vehicle threshold) at " +
-                position.lat.toFixed(5) + ", " + position.lng.toFixed(5) +
-                " (Speed: " + vehicle.speed.toFixed(1) + " km/h)"
-            );
-        }
-    } else {
-        if (congestionCircles.has(vehicle.vehicleId)) {
-            congestionCircles.get(vehicle.vehicleId).setMap(null);
-            congestionCircles.delete(vehicle.vehicleId);
-        }
-    }
-
-    // 4. Bypass overlay.
-    // NOTE (mock): a fixed ~200 m offset from the midpoint. There is no routing
-    // engine, no traffic data and no optimisation behind this line.
-    if (
-        isGlobalOptimizerActive &&
-        Number.isFinite(vehicle.destinationLat) &&
-        Number.isFinite(vehicle.destinationLng)
-    ) {
-        const bypassCoordinates = [
-            position,
-            {
-                lat: (position.lat + vehicle.destinationLat) / 2 + 0.002,
-                lng: (position.lng + vehicle.destinationLng) / 2 - 0.002
-            },
-            { lat: vehicle.destinationLat, lng: vehicle.destinationLng }
-        ];
-
-        if (bypassPolylines.has(vehicle.vehicleId)) {
-            bypassPolylines.get(vehicle.vehicleId).setPath(bypassCoordinates);
-        } else {
-            const polyline = new google.maps.Polyline({
-                path: bypassCoordinates,
-                geodesic: true,
-                strokeColor: "#ffa502",
-                strokeOpacity: 0.7,
-                strokeWeight: 4,
-                icons: [{
-                    icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 },
-                    offset: '0',
-                    repeat: '20px'
-                }],
-                map: map
-            });
-            bypassPolylines.set(vehicle.vehicleId, polyline);
-        }
-    } else {
-        if (bypassPolylines.has(vehicle.vehicleId)) {
-            bypassPolylines.get(vehicle.vehicleId).setMap(null);
-            bypassPolylines.delete(vehicle.vehicleId);
-        }
-    }
-}
-
-// Remove Vehicle from Map
-function removeVehicleFromMap(vehicleId) {
-    for (const store of [vehicleMarkers, routePolylines, congestionCircles, bypassPolylines]) {
-        if (store.has(vehicleId)) {
-            store.get(vehicleId).setMap(null);
-            store.delete(vehicleId);
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Sidebar
-// ---------------------------------------------------------------------------
-
-function updateVehicleList() {
-    const listEl = document.getElementById("vehicle-list");
-    const countEl = document.getElementById("vehicle-count");
-
-    countEl.textContent = `${activeVehicles.size} Active`;
-    clear(listEl);
-
-    if (activeVehicles.size === 0) {
-        listEl.appendChild(
-            el("p", {
-                className: "text-secondary",
-                text: "No vehicles online. Start the APK client to stream telemetry.",
-                style: { textAlign: "center", padding: "20px", fontSize: "12px" }
-            })
-        );
-        return;
-    }
-
-    activeVehicles.forEach((vehicle) => {
-        const isEmergency = Boolean(vehicle.isEmergency);
-        const classes = [
-            "vehicle-card",
-            "glass-panel",
-            isEmergency ? "emergency" : "normal",
-            selectedVehicleId === vehicle.vehicleId ? "active-selected" : ""
-        ].filter(Boolean).join(" ");
-
-        const card = el("div", { className: classes });
-        // Identity is carried on a dataset attribute and read by a delegated
-        // listener, replacing the old inline onclick that interpolated the ID
-        // straight into an attribute.
-        card.dataset.vehicleId = vehicle.vehicleId;
-
-        const top = el("div", { className: "card-top" }, [
-            el("span", { className: "vehicle-title", text: vehicle.vehicleId }),
-            el("span", {
-                className: "vehicle-type-tag" + (isEmergency ? " emergency-tag" : ""),
-                text: vehicle.type || "NORMAL"
-            })
-        ]);
-
-        const details = el("div", { className: "card-details" }, [
-            labelled("Driver:", vehicle.driverName || "-"),
-            labelled(
-                "Speed:",
-                vehicle.speed.toFixed(0) + " km/h",
-                "stat-value" + (vehicle.speed > SPEED_LIMIT_KMH ? " speeding" : "")
-            )
-        ]);
-
-        card.appendChild(top);
-        card.appendChild(details);
-        listEl.appendChild(card);
-    });
-}
-
-function focusVehicle(vehicleId) {
-    selectVehicleCard(vehicleId);
-
-    const vehicle = activeVehicles.get(vehicleId);
-    if (vehicle && map) {
-        map.setZoom(16);
-        map.panTo({ lat: vehicle.lat, lng: vehicle.lng });
-    }
-}
-
-function selectVehicleCard(vehicleId) {
-    selectedVehicleId = vehicleId;
-    document.querySelectorAll(".vehicle-card").forEach((card) => {
-        card.classList.toggle("active-selected", card.dataset.vehicleId === vehicleId);
-    });
-}
-
-// Connection State UI Helper
-function updateConnectionUI(connected, text) {
-    const dot = document.getElementById("status-dot");
-    const textEl = document.getElementById("status-text");
-
-    dot.classList.toggle("connected", connected);
-    textEl.textContent = text;
-}
-
-// ---------------------------------------------------------------------------
-// Analytics
-// ---------------------------------------------------------------------------
-
-function updateSystemAnalytics() {
-    if (activeVehicles.size === 0) {
-        document.getElementById("avg-speed-value").textContent = "0 km/h";
-        document.getElementById("avg-speed-bar").style.width = "0%";
-        return;
-    }
-
-    let totalSpeed = 0;
-    activeVehicles.forEach((v) => {
-        totalSpeed += v.speed;
-    });
-    const avgSpeed = totalSpeed / activeVehicles.size;
-
-    document.getElementById("avg-speed-value").textContent = `${avgSpeed.toFixed(1)} km/h`;
-
-    // Cap average speed display bar at 120 km/h for gauge logic
-    const pct = Math.min((avgSpeed / 120) * 100, 100);
-    document.getElementById("avg-speed-bar").style.width = `${pct}%`;
-
-    // NOTE (mock): this gauge is a placeholder driven by vehicle count. No
-    // latency is measured anywhere in the system.
-    const latencyBar = document.getElementById("latency-bar");
-    const latencyValue = document.getElementById("latency-value");
-    if (activeVehicles.size > 3) {
-        latencyBar.style.backgroundColor = "var(--orange-neon)";
-        latencyBar.style.width = "75%";
-        latencyValue.textContent = "78% (placeholder)";
-    } else {
-        latencyBar.style.backgroundColor = "var(--green-neon)";
-        latencyBar.style.width = "98%";
-        latencyValue.textContent = "98% (placeholder)";
-    }
-}
-
-// Toggle the bypass overlay. Draws alternative lines; does not reroute anything.
-function toggleGlobalOptimizer() {
-    const btn = document.getElementById("optimizer-btn");
-    isGlobalOptimizerActive = !isGlobalOptimizerActive;
-
-    if (isGlobalOptimizerActive) {
-        btn.textContent = "Hide Bypass Overlay";
-        btn.classList.add("btn-active");
-        logSystemMessage("[MOCK] Bypass overlay shown. No vehicle is actually rerouted.");
-    } else {
-        btn.textContent = "Show Bypass Overlay (Mock)";
-        btn.classList.remove("btn-active");
-        logSystemMessage("[MOCK] Bypass overlay hidden.");
-    }
-
-    activeVehicles.forEach((vehicle) => {
-        updateVehicleOnMap(vehicle);
-    });
-}
-
-// ---------------------------------------------------------------------------
-// Logs
-// ---------------------------------------------------------------------------
-
-function logsContainer() {
-    return document.getElementById("violation-logs");
-}
-
-function pushLogItem(node) {
-    const logsEl = logsContainer();
-    if (!logsEl) return;
-    const placeholder = logsEl.querySelector(".text-secondary");
-    if (placeholder) clear(logsEl);
-    logsEl.insertBefore(node, logsEl.firstChild);
-
-    // Newest first, so trimming from the end drops the oldest entries.
-    while (logsEl.childElementCount > MAX_LOG_ITEMS) {
-        logsEl.removeChild(logsEl.lastElementChild);
-    }
-}
-
-function logSpeedViolation(vehicle) {
-    speedingViolationsCount++;
-    document.getElementById("speeding-count-stat").textContent = speedingViolationsCount;
-
-    const timeStr = new Date().toLocaleTimeString();
-
-    const body = el("div", {}, [
-        el("strong", { text: "🚨 CRITICAL SPEED VIOLATION" }),
-        el("br"),
-        document.createTextNode("Vehicle "),
-        el("strong", { text: vehicle.vehicleId }),
-        document.createTextNode(" (Driver: " + (vehicle.driverName || "-") + ") clocked at "),
-        el("span", {
-            text: vehicle.speed.toFixed(0) + " km/h",
-            style: { color: "var(--red-neon)", fontWeight: "bold" }
-        }),
-        document.createTextNode(
-            ` (Limit: ${SPEED_LIMIT_KMH} km/h) at location: ` +
-            vehicle.lat.toFixed(5) + ", " + vehicle.lng.toFixed(5) + "."
-        )
-    ]);
-
-    const meta = el("div", {
-        style: {
-            textAlign: "right",
-            display: "flex",
-            flexDirection: "column",
-            gap: "4px",
-            alignItems: "flex-end"
-        }
-    }, [
-        el("span", { className: "log-time", text: timeStr }),
-        el("span", { className: "police-dispatch-badge", text: "MOCK DISPATCH" })
-    ]);
-
-    pushLogItem(el("div", { className: "log-item speed-violation" }, [body, meta]));
-
-    // NOTE (mock): nothing is transmitted to any police system. The block below
-    // is a locally generated illustration of what such a response might look
-    // like, with a randomly chosen ticket number and officer name.
-    const ticketId = "TK-" + Math.floor(100000 + Math.random() * 900000);
-    const officerList = ["Inspector S. Patel", "Sergeant A. Rawat", "Officer K. Rao", "Inspector M. Kumar"];
-    const patrolUnits = ["Patrol Unit Sector 4", "Interceptor Vehicle 12", "Highway Patrol Alpha", "City Command Unit 2"];
-
-    const mockResponse = {
-        _mock: true,
-        _note: "Generated in-browser. No request is sent and no such endpoint is contacted.",
-        status: "VIOLATION_RECORDED (SIMULATED)",
-        simulated_endpoint: "(none - illustrative only)",
-        timestamp: new Date().toISOString(),
-        dispatched: false,
-        incident_data: {
-            ticket_number: ticketId,
-            vehicle_number: vehicle.vehicleId,
-            driver: vehicle.driverName,
-            offense: "SPEED_LIMIT_EXCEEDED",
-            speed_recorded: `${vehicle.speed.toFixed(1)} km/h`,
-            speed_limit: `${SPEED_LIMIT_KMH}.0 km/h`,
-            location: {
-                latitude: vehicle.lat,
-                longitude: vehicle.lng
-            }
-        },
-        responder_dispatch: {
-            unit_name: patrolUnits[Math.floor(Math.random() * patrolUnits.length)],
-            assigned_officer: officerList[Math.floor(Math.random() * officerList.length)],
-            dispatch_eta: "6-8 mins",
-            command: "INTERCEPT_AND_ISSUE_TICKET"
-        }
-    };
-
-    const feedEl = document.getElementById("police-api-feed");
-    if (feedEl) {
-        feedEl.textContent = JSON.stringify(mockResponse, null, 2);
-    }
-}
-
-// Emergency Banner & Alerts
-function triggerEmergencyBanner(vehicle) {
-    const banner = document.getElementById("emergency-banner");
-    document.getElementById("emergency-banner-title").textContent =
-        `🚨 EMERGENCY Broadcast - ${vehicle.type} IN TRANSIT`;
-    document.getElementById("emergency-banner-text").textContent =
-        `Vehicle: ${vehicle.vehicleId} (Driver: ${vehicle.driverName}) has requested ` +
-        `clear-path routing. Alert Message: "${vehicle.alertMessage}"`;
-    banner.classList.add("show");
-}
-
-function dismissEmergencyBanner() {
-    document.getElementById("emergency-banner").classList.remove("show");
-}
-
-function logEmergencyAlert(vehicle) {
-    const dispatchEl = document.getElementById("emergency-dispatch-details");
-    const timeStr = new Date().toLocaleTimeString();
-
-    clear(dispatchEl);
-    dispatchEl.appendChild(
-        el("div", { style: { lineHeight: "1.5" } }, [
-            labelled("Vehicle ID:", vehicle.vehicleId), el("br"),
-            labelled("Type:", vehicle.type), el("br"),
-            labelled("Driver:", vehicle.driverName), el("br"),
-            document.createTextNode("Alert: "),
-            el("span", {
-                text: vehicle.alertMessage,
-                style: { color: "var(--red-neon)", fontWeight: "bold" }
-            }),
-            el("br"),
-            labelled("Time:", timeStr)
-        ])
-    );
-
-    // NOTE (mock): no signal controller is contacted and no corridor is cleared.
-    const body = el("div", {}, [
-        el("strong", { text: "🏥 [MOCK] CORRIDOR NOTICE" }),
-        el("br"),
-        document.createTextNode(
-            "Illustrative only - no traffic signal is contacted and no corridor is " +
-            "cleared for " + vehicle.vehicleId + "."
-        )
-    ]);
-
-    pushLogItem(
-        el("div", { className: "log-item emergency-alert" }, [
-            body,
-            el("span", { className: "log-time", text: timeStr })
-        ])
-    );
-}
-
-// Logging System Utility
-function logSystemMessage(message, type = "info") {
-    const logsEl = logsContainer();
-    if (!logsEl) return;
-
-    const isError = type === "error";
-    const body = el("div", {}, [
-        el("strong", { text: isError ? "⚠️ SYSTEM ERROR" : "🤖 SYSTEM CHECK" }),
-        el("br"),
-        document.createTextNode(String(message))
-    ]);
-
-    pushLogItem(
-        el("div", { className: "log-item " + (isError ? "speed-violation" : "system-info") }, [
-            body,
-            el("span", { className: "log-time", text: new Date().toLocaleTimeString() })
-        ])
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Browser client simulator
-// ---------------------------------------------------------------------------
-// The simulator behaves like a real vehicle client: it logs in over REST and
-// opens its own socket on /vehicle/stream. Its frames come back through the
-// normal dashboard subscription, so there is no local echo to special-case.
-
-function toggleSimType() {
-    const typeSelect = document.getElementById("sim-vehicle-type");
-    const alertInput = document.getElementById("sim-alert-message");
-    const codeInput = document.getElementById("sim-emergency-code");
-    const isEmergency = typeSelect.value !== "NORMAL";
-
-    alertInput.disabled = !isEmergency;
-    if (codeInput) codeInput.disabled = !isEmergency;
-}
-
-const SIM_PATH = [
-    { lat: 12.9716, lng: 77.5946 },
-    { lat: 12.9723, lng: 77.5950 },
-    { lat: 12.9732, lng: 77.5955 },
-    { lat: 12.9744, lng: 77.5961 },
-    { lat: 12.9750, lng: 77.5969 },
-    { lat: 12.9757, lng: 77.5978 },
-    { lat: 12.9760, lng: 77.5990 },
-    { lat: 12.9758, lng: 77.6002 },
-    { lat: 12.9753, lng: 77.6012 },
-    { lat: 12.9743, lng: 77.6020 },
-    { lat: 12.9732, lng: 77.6018 },
-    { lat: 12.9721, lng: 77.6010 },
-    { lat: 12.9713, lng: 77.6000 },
-    { lat: 12.9706, lng: 77.5989 },
-    { lat: 12.9701, lng: 77.5976 },
-    { lat: 12.9698, lng: 77.5963 },
-    { lat: 12.9702, lng: 77.5951 },
-    { lat: 12.9709, lng: 77.5944 }
-];
-
-function simLog(line) {
-    const coordDisplay = document.getElementById("sim-coordinate-display");
-    coordDisplay.textContent += line + "\n";
-    coordDisplay.scrollTop = coordDisplay.scrollHeight;
-}
-
-async function toggleSimulatorEngine() {
-    if (isSimulating) {
-        stopSimulator();
-        return;
-    }
-
-    const startBtn = document.getElementById("sim-start-btn");
-    const coordDisplay = document.getElementById("sim-coordinate-display");
-
-    const vehicleId = document.getElementById("sim-vehicle-id").value.trim();
-    const driverName = document.getElementById("sim-driver-name").value.trim();
-    const type = document.getElementById("sim-vehicle-type").value;
-    const isEmergency = type !== "NORMAL";
-    const emergencyCode = isEmergency
-        ? document.getElementById("sim-emergency-code").value.trim()
-        : null;
-
-    startBtn.disabled = true;
-    coordDisplay.textContent = "=== Authenticating ===\n";
-
-    let token;
-    try {
-        const res = await fetch("http://" + backendHost() + "/api/auth/login", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                name: driverName,
-                vehicleId: vehicleId,
-                vehicleType: type,
-                isEmergency: isEmergency,
-                emergencyCode: emergencyCode
-            })
-        });
-        const data = await res.json();
-        if (!res.ok || !data.success) {
-            simLog("LOGIN FAILED: " + (data.message || res.status));
-            logSystemMessage("Simulator login rejected: " + (data.message || res.status), "error");
-            startBtn.disabled = false;
-            return;
-        }
-        token = data.token;
-        simLog("Login OK. Emergency granted: " + Boolean(data.isEmergency));
-    } catch (e) {
-        simLog("LOGIN ERROR: backend unreachable.");
-        logSystemMessage("Simulator could not reach the backend for login.", "error");
-        startBtn.disabled = false;
-        return;
-    }
-
-    simSocket = new WebSocket(
-        "ws://" + backendHost() + "/vehicle/stream?token=" + encodeURIComponent(token)
-    );
-
-    simSocket.onopen = () => {
-        isSimulating = true;
-        simIndex = 0;
-        startBtn.disabled = false;
-        startBtn.textContent = "Stop Browser Simulation";
-        startBtn.style.background = "var(--red-neon)";
-        simLog("=== Simulation Started ===");
-        logSystemMessage("Browser-side vehicle simulation active as " + vehicleId + ".");
-
-        simulationInterval = setInterval(() => {
-            if (!simSocket || simSocket.readyState !== WebSocket.OPEN) return;
-
-            const speed = parseFloat(document.getElementById("sim-speed").value) || 0;
-            const alertMessage = isEmergency
-                ? document.getElementById("sim-alert-message").value
-                : null;
-            const point = SIM_PATH[simIndex];
-
-            // Identity fields are ignored by the server, which uses the session
-            // bound to this token. They are sent only to match the real client's
-            // payload shape.
-            simSocket.send(JSON.stringify({
-                vehicleId: vehicleId,
-                driverName: driverName,
-                type: type,
-                lat: point.lat,
-                lng: point.lng,
-                speed: speed,
-                direction: 90.0,
-                timestamp: Math.floor(Date.now() / 1000),
-                isEmergency: isEmergency,
-                destinationLat: isEmergency ? 12.9760 : null,
-                destinationLng: isEmergency ? 77.6010 : null,
-                destinationName: isEmergency ? "City General Hospital" : null,
-                alertMessage: alertMessage
-            }));
-
-            simLog(
-                `[${new Date().toLocaleTimeString()}] Sent: Lat: ${point.lat.toFixed(5)}, ` +
-                `Lng: ${point.lng.toFixed(5)}, Speed: ${speed.toFixed(0)} km/h`
-            );
-
-            simIndex = (simIndex + 1) % SIM_PATH.length;
-        }, 1000);
-    };
-
-    simSocket.onclose = () => {
-        if (isSimulating) {
-            simLog("=== Socket closed by server ===");
-            stopSimulator();
-        } else {
-            startBtn.disabled = false;
-        }
-    };
-
-    simSocket.onerror = () => {
-        simLog("Vehicle socket error - token may have been rejected.");
-    };
-}
-
-function stopSimulator() {
-    const startBtn = document.getElementById("sim-start-btn");
-    isSimulating = false;
-    clearInterval(simulationInterval);
-    simulationInterval = null;
-
-    if (simSocket) {
-        const socket = simSocket;
-        simSocket = null;
-        if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-            socket.close(1000, "Simulation stopped");
-        }
-    }
-
-    startBtn.disabled = false;
-    startBtn.textContent = "Start Browser Simulation";
-    startBtn.style.background = "var(--cyan-neon)";
-    simLog("=== Simulation Stopped ===");
-    logSystemMessage("Browser-side vehicle simulation stopped.");
-}
-
-// ---------------------------------------------------------------------------
-// Tabs
-// ---------------------------------------------------------------------------
-
-function switchTab(tabId) {
-    document.querySelectorAll(".tab-btn").forEach((btn) => {
-        btn.classList.toggle("active", btn.dataset.tab === tabId);
-    });
-
-    const dashboard = document.querySelector(".dashboard-grid");
-    if (dashboard) {
-        dashboard.classList.remove(
-            "focus-all", "focus-map", "focus-emergency", "focus-violations", "focus-simulator"
-        );
-        dashboard.classList.add("focus-" + tabId.replace("-tab", ""));
-    }
-
-    const filterName = tabId
-        .replace("-tab", "")
-        .toUpperCase()
-        .replace("MAP", "TRAFFIC")
-        .replace("ALL", "ALL SYSTEMS");
-    logSystemMessage(`Command Center switched focus to: ${filterName}`);
-}
-
-// ---------------------------------------------------------------------------
-// Wiring
-// ---------------------------------------------------------------------------
-
-document.addEventListener("DOMContentLoaded", () => {
-    // Delegated click handling replaces the inline onclick attributes that
-    // previously interpolated vehicle IDs into markup.
-    document.getElementById("vehicle-list").addEventListener("click", (event) => {
-        const card = event.target.closest(".vehicle-card");
-        if (card && card.dataset.vehicleId) {
-            focusVehicle(card.dataset.vehicleId);
-        }
-    });
-
-    document.querySelectorAll(".tab-btn").forEach((btn) => {
-        btn.addEventListener("click", () => switchTab(btn.dataset.tab));
-    });
-
-    document.getElementById("optimizer-btn").addEventListener("click", toggleGlobalOptimizer);
-    document.getElementById("sim-start-btn").addEventListener("click", toggleSimulatorEngine);
-    document.getElementById("sim-vehicle-type").addEventListener("change", toggleSimType);
-    document.querySelector(".alert-close-btn").addEventListener("click", dismissEmergencyBanner);
-
-    loadGoogleMaps();
+$('gate-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  $('gate-error').hidden = true;
+  const button = $('gate-submit');
+  button.disabled = true;
+  button.textContent = 'Signing in…';
+
+  const { error } = await supabase.auth.signInWithPassword({
+    email: $('email').value.trim(),
+    password: $('password').value,
+  });
+
+  if (error) gateError(error.message);
+  else await enterConsole();
+
+  button.disabled = false;
+  button.textContent = 'Sign in';
 });
 
-// initMap is referenced by the Maps loader callback, which resolves off window.
-window.initMap = initMap;
+$('gate-signup').addEventListener('click', async () => {
+  $('gate-error').hidden = true;
+  const { data, error } = await supabase.auth.signUp({
+    email: $('email').value.trim(),
+    password: $('password').value,
+  });
+  if (error) return gateError(error.message);
+  // With email confirmation on, signUp returns a user but no session.
+  if (!data.session) return gateError('Account created. Confirm your email, then sign in.');
+  await enterConsole();
+});
+
+$('sign-out').addEventListener('click', async () => {
+  await supabase.auth.signOut();
+  location.reload();
+});
+
+// ---------------------------------------------------------------------------
+// Map
+// ---------------------------------------------------------------------------
+
+function initMap() {
+  state.map = new maplibregl.Map({
+    container: 'map',
+    style: MAP_STYLE,
+    center: [77.5946, 12.9716],
+    zoom: 11,
+  });
+  state.map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+}
+
+function markerElement(entry) {
+  const wrap = el('div', { className: 'marker' });
+  wrap.appendChild(el('div', { className: 'marker-avatar', text: glyph(entry) }));
+  wrap.appendChild(el('span', { className: 'marker-badge', text: plate(entry) }));
+  wrap.addEventListener('click', () => selectVehicle(entry.position.vehicle_id));
+  return wrap;
+}
+
+function refreshMarker(entry) {
+  const lngLat = [entry.position.lng, entry.position.lat];
+  if (!entry.marker) {
+    entry.marker = new maplibregl.Marker({ element: markerElement(entry) })
+      .setLngLat(lngLat)
+      .addTo(state.map);
+  } else {
+    entry.marker.setLngLat(lngLat);
+  }
+
+  const root = entry.marker.getElement();
+  root.classList.toggle('emergency', !!entry.vehicle?.is_emergency_authorized);
+  root.classList.toggle('selected', state.selectedId === entry.position.vehicle_id);
+
+  const badge = root.querySelector('.marker-badge');
+  const speed = num(entry.position.speed);
+  badge.textContent = `${plate(entry)} · ${speed.toFixed(0)}`;
+  badge.classList.toggle('over', speed > state.speedLimit);
+
+  const avatar = root.querySelector('.marker-avatar');
+  if (avatar.textContent !== glyph(entry)) avatar.textContent = glyph(entry);
+}
+
+function selectVehicle(vehicleId) {
+  state.selectedId = vehicleId;
+  const entry = state.fleet.get(vehicleId);
+  if (entry) {
+    state.map.easeTo({ center: [entry.position.lng, entry.position.lat], zoom: 15, duration: 600 });
+  }
+  state.fleet.forEach(refreshMarker);
+  renderFleet();
+  renderDetail();
+}
+
+$('fit-all').addEventListener('click', () => {
+  const entries = [...state.fleet.values()];
+  if (entries.length === 0) return;
+  const first = [entries[0].position.lng, entries[0].position.lat];
+  const bounds = entries.reduce(
+    (b, e) => b.extend([e.position.lng, e.position.lat]),
+    new maplibregl.LngLatBounds(first, first),
+  );
+  state.map.fitBounds(bounds, { padding: 120, maxZoom: 15, duration: 700 });
+});
+
+/** Draw a vehicle's recent track. Reuses one source id so switching vehicles
+ *  replaces the trail rather than stacking layers. */
+function drawTrack(points) {
+  const SRC = 'track';
+  const coords = points.map((p) => [p.lng, p.lat]);
+
+  if (state.map.getLayer('track-line')) state.map.removeLayer('track-line');
+  if (state.map.getSource(SRC)) state.map.removeSource(SRC);
+  if (coords.length < 2) return;
+
+  state.map.addSource(SRC, {
+    type: 'geojson',
+    data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } },
+  });
+  state.map.addLayer({
+    id: 'track-line',
+    type: 'line',
+    source: SRC,
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': '#D7F94A', 'line-width': 4, 'line-opacity': 0.9 },
+  });
+  state.map.fitBounds(
+    coords.reduce((b, c) => b.extend(c), new maplibregl.LngLatBounds(coords[0], coords[0])),
+    { padding: 100, maxZoom: 16, duration: 700 },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Fleet list
+// ---------------------------------------------------------------------------
+
+function visibleFleet() {
+  const query = state.query.trim().toLowerCase();
+  let rows = [...state.fleet.values()];
+
+  if (state.filter === 'emergency') rows = rows.filter((e) => e.vehicle?.is_emergency_authorized);
+  if (state.filter === 'speeding') rows = rows.filter((e) => num(e.position.speed) > state.speedLimit);
+
+  if (query) {
+    rows = rows.filter((e) =>
+      `${e.vehicle?.vehicle_number ?? ''} ${e.vehicle?.driver_name ?? ''}`.toLowerCase().includes(query),
+    );
+  }
+
+  rows.sort((a, b) =>
+    state.sort === 'speed'
+      ? num(b.position.speed) - num(a.position.speed)
+      : plate(a).localeCompare(plate(b)),
+  );
+  return rows;
+}
+
+function renderFleet() {
+  const list = $('vehicle-list');
+  clear(list);
+
+  const rows = visibleFleet();
+  $('fleet-count').textContent = `${state.fleet.size} vehicle${state.fleet.size === 1 ? '' : 's'}`;
+
+  if (rows.length === 0) {
+    list.appendChild(
+      el('p', {
+        className: 'muted empty',
+        text: state.fleet.size === 0
+          ? (state.isOperator
+              ? 'No vehicles streaming. Start a shift in the mobile app.'
+              : 'No vehicles yet. Register one in the mobile app and start a shift.')
+          : 'Nothing matches that filter.',
+      }),
+    );
+    return;
+  }
+
+  rows.forEach((entry) => {
+    const speed = num(entry.position.speed);
+    const over = speed > state.speedLimit;
+    const stale = isStale(entry);
+
+    const row = el('div', {
+      className: 'row' + (state.selectedId === entry.position.vehicle_id ? ' selected' : ''),
+    });
+    row.addEventListener('click', () => selectVehicle(entry.position.vehicle_id));
+
+    row.appendChild(
+      el('div', {
+        className: 'avatar' + (entry.vehicle?.is_emergency_authorized ? ' emergency' : ''),
+        text: glyph(entry),
+      }),
+    );
+
+    const meta = el('div', { className: 'row-meta' }, [
+      el('span', {
+        className: stale ? 'stale' : over ? 'over' : 'live',
+        text: stale ? 'Offline' : `${speed.toFixed(0)} km/h`,
+      }),
+      el('span', { text: '·' }),
+      el('span', { text: entry.vehicle?.driver_name ?? 'Unknown driver' }),
+    ]);
+
+    row.appendChild(
+      el('div', { className: 'row-body' }, [
+        el('div', { className: 'row-title', text: plate(entry) }),
+        meta,
+      ]),
+    );
+
+    list.appendChild(row);
+  });
+}
+
+$('search').addEventListener('input', (e) => {
+  state.query = e.target.value;
+  renderFleet();
+});
+
+function wireChips(containerId, key, onChange) {
+  $(containerId).addEventListener('click', (event) => {
+    const button = event.target.closest('.chip');
+    if (!button) return;
+    state[key] = button.dataset[key === 'filter' ? 'filter' : 'sort'];
+    [...$(containerId).children].forEach((c) => c.classList.toggle('active', c === button));
+    onChange();
+  });
+}
+wireChips('filter-chips', 'filter', renderFleet);
+wireChips('sort-chips', 'sort', renderFleet);
+
+// ---------------------------------------------------------------------------
+// Detail card
+// ---------------------------------------------------------------------------
+
+function stat(label, value, over) {
+  return el('div', { className: 'stat' }, [
+    el('b', { text: value, className: over ? 'over' : '' }),
+    el('small', { text: label }),
+  ]);
+}
+
+function renderDetail() {
+  const card = $('detail');
+  const entry = state.selectedId ? state.fleet.get(state.selectedId) : null;
+
+  if (!entry) {
+    card.hidden = true;
+    return;
+  }
+
+  clear(card);
+  card.hidden = false;
+
+  const speed = num(entry.position.speed);
+  const stale = isStale(entry);
+  const seen = new Date(entry.position.updated_at);
+
+  card.appendChild(
+    el('div', { className: 'detail-head' }, [
+      el('div', {
+        className: 'avatar' + (entry.vehicle?.is_emergency_authorized ? ' emergency' : ''),
+        text: glyph(entry),
+      }),
+      el('div', {}, [
+        el('div', { className: 'detail-title', text: plate(entry) }),
+        el('div', {
+          className: 'detail-sub',
+          text: `${entry.vehicle?.driver_name ?? 'Unknown'} · ${entry.vehicle?.vehicle_type ?? 'NORMAL'}`,
+        }),
+      ]),
+    ]),
+  );
+
+  card.appendChild(
+    el('div', { className: 'stat-row' }, [
+      stat('Speed', `${speed.toFixed(0)}`, speed > state.speedLimit),
+      stat('Status', stale ? 'Offline' : 'Live'),
+      stat('Last seen', seen.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })),
+    ]),
+  );
+
+  card.appendChild(
+    el('div', {
+      className: 'detail-sub',
+      text: `${entry.position.lat.toFixed(5)}, ${entry.position.lng.toFixed(5)}`,
+    }),
+  );
+
+  if (entry.position.alert_message) {
+    card.appendChild(el('div', { className: 'detail-alert', text: entry.position.alert_message }));
+  }
+
+  const actions = el('div', { className: 'detail-actions' });
+
+  const trackBtn = el('button', { className: 'btn', text: 'Track' });
+  trackBtn.addEventListener('click', () => openInsights(entry.position.vehicle_id));
+  actions.appendChild(trackBtn);
+
+  // The one role-conditional control in the interface.
+  if (state.isOperator) {
+    const alertBtn = el('button', { className: 'btn accent', text: 'Send alert' });
+    alertBtn.addEventListener('click', () => openComposer(entry.position.vehicle_id));
+    actions.appendChild(alertBtn);
+  }
+
+  const closeBtn = el('button', { className: 'btn', text: 'Close' });
+  closeBtn.addEventListener('click', () => {
+    state.selectedId = null;
+    state.fleet.forEach(refreshMarker);
+    renderFleet();
+    renderDetail();
+  });
+  actions.appendChild(closeBtn);
+
+  card.appendChild(actions);
+}
+
+// ---------------------------------------------------------------------------
+// Insights drawer: history, violations, APK download
+// ---------------------------------------------------------------------------
+
+const drawer = $('drawer');
+
+function closeDrawer() {
+  drawer.hidden = true;
+  clear(drawer);
+}
+
+function drawerShell(title) {
+  clear(drawer);
+  drawer.hidden = false;
+  const close = el('button', { className: 'icon-btn', text: '\u2715' });
+  close.addEventListener('click', closeDrawer);
+  drawer.appendChild(el('div', { className: 'drawer-head' }, [el('h2', { text: title }), close]));
+}
+
+function describeViolation(v) {
+  const over = Number(v.speed) - Number(v.speed_limit);
+  const ended = v.cleared_at ? new Date(v.cleared_at) : null;
+  const started = new Date(v.occurred_at);
+  const seconds = ended ? Math.max(1, Math.round((ended - started) / 1000)) : null;
+
+  return {
+    when: started.toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }),
+    // "Why" in the only sense the data supports: by how much, and for how long.
+    why: `${over.toFixed(0)} km/h over the ${Number(v.speed_limit).toFixed(0)} limit` +
+      (seconds ? ` for ${seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)} min`}` : ', still open'),
+    where: `${Number(v.lat).toFixed(4)}, ${Number(v.lng).toFixed(4)}`,
+    peak: `${Number(v.speed).toFixed(0)} km/h`,
+  };
+}
+
+async function openInsights(vehicleId) {
+  const entry = state.fleet.get(vehicleId);
+  drawerShell(entry ? `${plate(entry)} · last ${HISTORY_DAYS} days` : `Last ${HISTORY_DAYS} days`);
+  drawer.appendChild(el('p', { className: 'muted', text: 'Loading…' }));
+
+  const since = new Date(Date.now() - HISTORY_DAYS * 86_400_000).toISOString();
+
+  const [historyRes, violationRes] = await Promise.all([
+    supabase
+      .from('position_history')
+      .select('lat, lng, speed, recorded_at')
+      .eq('vehicle_id', vehicleId)
+      .gte('recorded_at', since)
+      .order('recorded_at', { ascending: true })
+      .limit(5000),
+    supabase
+      .from('violations')
+      .select('speed, speed_limit, lat, lng, occurred_at, cleared_at')
+      .eq('vehicle_id', vehicleId)
+      .gte('occurred_at', since)
+      .order('occurred_at', { ascending: false }),
+  ]);
+
+  drawerShell(entry ? `${plate(entry)} · last ${HISTORY_DAYS} days` : `Last ${HISTORY_DAYS} days`);
+
+  if (historyRes.error) {
+    drawer.appendChild(el('p', { className: 'error', text: historyRes.error.message }));
+    return;
+  }
+
+  const points = historyRes.data ?? [];
+  const violations = violationRes.data ?? [];
+
+  // Distance from the track itself rather than a stored odometer, so it stays
+  // honest about what was actually recorded.
+  let metres = 0;
+  for (let i = 1; i < points.length; i++) metres += haversine(points[i - 1], points[i]);
+  const topSpeed = points.reduce((m, p) => Math.max(m, Number(p.speed) || 0), 0);
+
+  drawer.appendChild(
+    el('div', { className: 'summary-row' }, [
+      el('div', { className: 'summary' }, [
+        el('b', { text: (metres / 1000).toFixed(1) }),
+        el('small', { text: 'km driven' }),
+      ]),
+      el('div', { className: 'summary' }, [
+        el('b', { text: topSpeed.toFixed(0) }),
+        el('small', { text: 'top km/h' }),
+      ]),
+      el('div', { className: 'summary' }, [
+        el('b', { text: String(violations.length) }),
+        el('small', { text: 'violations' }),
+      ]),
+    ]),
+  );
+
+  if (points.length > 1) {
+    const showBtn = el('button', { className: 'btn accent', text: 'Show track on map' });
+    showBtn.addEventListener('click', () => {
+      drawTrack(points);
+      closeDrawer();
+    });
+    drawer.appendChild(showBtn);
+  } else {
+    drawer.appendChild(
+      el('p', { className: 'muted', text: 'No recorded positions in this window yet.' }),
+    );
+  }
+
+  drawer.appendChild(el('small', { className: 'muted', text: 'RULE BREAKS' }));
+
+  if (violations.length === 0) {
+    drawer.appendChild(el('p', { className: 'muted', text: 'No violations. Clean week.' }));
+  } else {
+    violations.forEach((v) => {
+      const d = describeViolation(v);
+      drawer.appendChild(
+        el('div', { className: 'violation-item' }, [
+          el('span', { className: 'when', text: d.when }),
+          el('span', { className: 'peak', text: `Peak ${d.peak}` }),
+          el('span', { className: 'why', text: d.why }),
+          el('span', { className: 'why', text: `at ${d.where}` }),
+        ]),
+      );
+    });
+  }
+}
+
+function haversine(a, b) {
+  const R = 6371000;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+// ---------------------------------------------------------------------------
+// Alert composer (operators only)
+// ---------------------------------------------------------------------------
+
+async function openComposer(vehicleId) {
+  const entry = vehicleId ? state.fleet.get(vehicleId) : null;
+  drawerShell('Send alert');
+
+  const target = el('select', { className: 'field-sm' });
+  target.appendChild(el('option', { text: 'Whole fleet (broadcast)' })).value = '';
+  state.fleet.forEach((e, id) => {
+    const option = el('option', { text: `${plate(e)} · ${e.vehicle?.driver_name ?? ''}` });
+    option.value = id;
+    if (id === vehicleId) option.selected = true;
+    target.appendChild(option);
+  });
+
+  const category = el('select', { className: 'field-sm' });
+  [
+    ['CONGESTION', 'Congestion ahead'],
+    ['HAZARD', 'Hazard'],
+    ['RULE', 'Rule broken'],
+    ['MESSAGE', 'Message'],
+  ].forEach(([value, label]) => {
+    const option = el('option', { text: label });
+    option.value = value;
+    category.appendChild(option);
+  });
+
+  const severity = el('select', { className: 'field-sm' });
+  ['INFO', 'WARNING', 'CRITICAL'].forEach((value) => {
+    const option = el('option', { text: value });
+    option.value = value;
+    severity.appendChild(option);
+  });
+
+  const message = el('textarea', {
+    className: 'field-sm',
+    placeholder: entry
+      ? `Message to ${plate(entry)}…`
+      : 'Message to every vehicle on shift…',
+  });
+  message.maxLength = 300;
+
+  const status = el('p', { className: 'muted', text: '' });
+  const send = el('button', { className: 'btn accent', text: 'Send alert' });
+
+  send.addEventListener('click', async () => {
+    const text = message.value.trim();
+    if (!text) {
+      status.textContent = 'Write a message first.';
+      return;
+    }
+
+    send.disabled = true;
+    send.textContent = 'Sending…';
+
+    const { data: userData } = await supabase.auth.getUser();
+    const { error } = await supabase.from('alerts').insert({
+      created_by: userData.user.id,
+      vehicle_id: target.value || null,
+      category: category.value,
+      severity: severity.value,
+      message: text,
+    });
+
+    send.disabled = false;
+    send.textContent = 'Send alert';
+
+    if (error) {
+      status.textContent = error.message;
+      return;
+    }
+
+    message.value = '';
+    status.textContent = 'Sent.';
+    logEvent('alert', 'Alert sent', target.value ? `to ${plate(state.fleet.get(target.value))}` : 'to the whole fleet');
+  });
+
+  drawer.appendChild(el('small', { className: 'muted', text: 'RECIPIENT' }));
+  drawer.appendChild(target);
+  drawer.appendChild(el('small', { className: 'muted', text: 'CATEGORY' }));
+  drawer.appendChild(category);
+  drawer.appendChild(el('small', { className: 'muted', text: 'SEVERITY' }));
+  drawer.appendChild(severity);
+  drawer.appendChild(el('small', { className: 'muted', text: 'MESSAGE' }));
+  drawer.appendChild(message);
+  drawer.appendChild(send);
+  drawer.appendChild(status);
+}
+
+// The Insights button opens whatever is useful for the current role and
+// selection, so both roles reach it the same way.
+$('open-drawer').addEventListener('click', () => {
+  if (state.selectedId) return openInsights(state.selectedId);
+  const first = [...state.fleet.keys()][0];
+  if (first) return openInsights(first);
+
+  drawerShell('Nothing to show yet');
+  drawer.appendChild(
+    el('p', {
+      className: 'muted',
+      text: 'Register a vehicle in the mobile app and start a shift. History appears here once positions are recorded.',
+    }),
+  );
+  drawer.appendChild(apkLink());
+});
+
+function apkLink() {
+  const url = CONFIG.APK_URL;
+  if (!url) {
+    return el('span', {
+      className: 'download disabled',
+      text: 'Android app — build link not configured',
+    });
+  }
+  return el('a', { className: 'download', href: url, text: 'Download the Android app' });
+}
+
+// ---------------------------------------------------------------------------
+// Telemetry
+// ---------------------------------------------------------------------------
+
+function pushLog(node) {
+  const log = $('log');
+  const placeholder = log.querySelector('.empty');
+  if (placeholder) clear(log);
+  log.insertBefore(node, log.firstChild);
+  while (log.childElementCount > MAX_LOG_ITEMS) log.removeChild(log.lastElementChild);
+}
+
+function logEvent(kind, title, detail) {
+  pushLog(
+    el('div', { className: `event ${kind}` }, [
+      el('div', {}, [
+        el('strong', { text: title }),
+        el('br'),
+        el('span', { className: 'muted', text: detail }),
+      ]),
+      el('time', { text: new Date().toLocaleTimeString() }),
+    ]),
+  );
+}
+
+/** Vehicle identity is fetched once and cached; positions arrive far more often
+ *  than the row changes, so joining on every frame would be wasteful. */
+async function ensureVehicle(entry, vehicleId) {
+  if (entry.vehicle) return;
+  const { data } = await supabase
+    .from('vehicles')
+    .select('id, vehicle_number, driver_name, vehicle_type, is_emergency_authorized')
+    .eq('id', vehicleId)
+    .maybeSingle();
+  if (!data) return;
+  entry.vehicle = data;
+  refreshMarker(entry);
+  renderFleet();
+  logEvent('info', 'Vehicle online', `${data.vehicle_number} · ${data.driver_name}`);
+}
+
+function applyPosition(position) {
+  if (!position || typeof position.vehicle_id !== 'string') return;
+  if (!Number.isFinite(position.lat) || !Number.isFinite(position.lng)) return;
+
+  const entry = state.fleet.get(position.vehicle_id) ?? { vehicle: null, marker: null };
+  entry.position = position;
+  state.fleet.set(position.vehicle_id, entry);
+
+  ensureVehicle(entry, position.vehicle_id);
+  refreshMarker(entry);
+
+  if (state.selectedId === position.vehicle_id) {
+    state.map.easeTo({ center: [position.lng, position.lat], duration: 400 });
+    renderDetail();
+  }
+
+  renderFleet();
+}
+
+function setConnection(text, live) {
+  $('conn-state').textContent = text;
+  $('live-dot').classList.toggle('on', !!live);
+}
+
+async function loadViolationCount() {
+  const since = new Date(Date.now() - HISTORY_DAYS * 86_400_000).toISOString();
+  const { count } = await supabase
+    .from('violations')
+    .select('id', { count: 'exact', head: true })
+    .gte('occurred_at', since);
+  state.violations = count ?? 0;
+  $('violation-count').textContent = `${state.violations} speeding`;
+}
+
+async function startConsole() {
+  initMap();
+
+  // Backfill so a console opened mid-shift is not blank until the next frame.
+  const { data, error } = await supabase.from('vehicle_positions').select('*');
+  if (error) logEvent('violation', 'Could not load fleet', error.message);
+  else (data ?? []).forEach(applyPosition);
+
+  renderFleet();
+  loadViolationCount();
+
+  supabase
+    .channel('sutra-fleet')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'vehicle_positions' }, (payload) => {
+      if (payload.eventType === 'DELETE') {
+        const id = payload.old?.vehicle_id;
+        const entry = state.fleet.get(id);
+        entry?.marker?.remove();
+        state.fleet.delete(id);
+        if (state.selectedId === id) state.selectedId = null;
+        renderFleet();
+        renderDetail();
+        return;
+      }
+      applyPosition(payload.new);
+    })
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'violations' }, (payload) => {
+      state.violations += 1;
+      $('violation-count').textContent = `${state.violations} speeding`;
+      const entry = state.fleet.get(payload.new.vehicle_id);
+      logEvent(
+        'violation',
+        'Speed violation',
+        `${entry ? plate(entry) : payload.new.vehicle_id} peaked at ${Number(payload.new.speed).toFixed(0)} km/h`,
+      );
+    })
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'alerts' }, (payload) => {
+      const entry = payload.new.vehicle_id ? state.fleet.get(payload.new.vehicle_id) : null;
+      logEvent(
+        'alert',
+        `${payload.new.category} alert`,
+        `${entry ? plate(entry) : 'Fleet'} — ${payload.new.message}`,
+      );
+    })
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') setConnection('live', true);
+      else if (status === 'CHANNEL_ERROR') setConnection('connection error', false);
+      else if (status === 'CLOSED') setConnection('disconnected', false);
+      else setConnection(status.toLowerCase(), false);
+    });
+
+  // A vehicle that stops streaming leaves its last row behind, so staleness is
+  // re-rendered on a timer rather than waiting for an event that never arrives.
+  setInterval(() => {
+    renderFleet();
+    if (state.selectedId) renderDetail();
+  }, 10_000);
+}
+
+// Resume an existing session so a refresh does not force another sign-in.
+supabase.auth.getSession().then(({ data }) => {
+  if (data.session) enterConsole();
+});

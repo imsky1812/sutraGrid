@@ -8,4 +8,7 @@
 window.SUTRA_CONFIG = {
     SUPABASE_URL: 'https://your-project-ref.supabase.co',
     SUPABASE_ANON_KEY: 'your-anon-key',
+
+    // Optional: EAS build download link, shown in the console.
+    APK_URL: '',
 };

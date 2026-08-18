@@ -5,40 +5,40 @@
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.css">
 <link rel="stylesheet" href="style.css">
 
-<!-- Sign-in gate. An operator is a Supabase user listed in the operators table. -->
 <div id="gate" class="gate">
   <form id="gate-form" class="gate-card" autocomplete="on">
-    <span class="brand"><span class="brand-mark">◎</span> sutra control</span>
-    <h1>Operator sign-in</h1>
-    <p class="muted">Live fleet telemetry. Access is granted per account.</p>
+    <span class="brand"><span class="brand-mark">&#9678;</span> sutra control</span>
+    <h1>Sign in</h1>
+    <p class="muted">Operators monitor the fleet. Drivers see their own vehicles and history. The same account works in the mobile app.</p>
 
     <label class="label" for="email">Email</label>
-    <input class="field" id="email" type="email" autocomplete="username" placeholder="ops@example.com" required>
+    <input class="field" id="email" type="email" autocomplete="username" placeholder="you@example.com" required>
 
     <label class="label" for="password">Password</label>
     <input class="field" id="password" type="password" autocomplete="current-password" placeholder="Password" required>
 
     <p id="gate-error" class="error" hidden></p>
     <button class="pill accent" id="gate-submit" type="submit">Sign in</button>
+    <button class="btn" id="gate-signup" type="button">Create an account</button>
   </form>
 </div>
 
 <main id="console" class="shell" hidden>
   <aside class="sidebar">
     <div class="sidebar-head">
-      <span class="brand"><span class="brand-mark">◎</span> sutra control</span>
+      <span class="brand"><span class="brand-mark">&#9678;</span> sutra control</span>
       <button class="icon-btn" id="sign-out" title="Sign out" aria-label="Sign out">&#9096;</button>
     </div>
 
     <div class="search">
-      <input id="search" type="search" placeholder="Search vehicle or driver..." aria-label="Search fleet">
+      <input id="search" type="search" placeholder="Search vehicle or driver" aria-label="Search fleet">
       <span class="search-icon" aria-hidden="true">&#9906;</span>
     </div>
 
     <div class="filters">
       <div class="filter-group">
         <small class="muted">Show me</small>
-        <div class="chips" id="filter-chips" role="group" aria-label="Filter fleet">
+        <div class="chips" id="filter-chips" role="group" aria-label="Filter">
           <button class="chip active" data-filter="all" type="button">All</button>
           <button class="chip" data-filter="emergency" type="button">Emergency</button>
           <button class="chip" data-filter="speeding" type="button">Speeding</button>
@@ -46,7 +46,7 @@
       </div>
       <div class="filter-group">
         <small class="muted">Sort by</small>
-        <div class="chips" id="sort-chips" role="group" aria-label="Sort fleet">
+        <div class="chips" id="sort-chips" role="group" aria-label="Sort">
           <button class="chip active" data-sort="plate" type="button">Plate</button>
           <button class="chip" data-sort="speed" type="button">Speed</button>
         </div>
@@ -61,7 +61,7 @@
     <div id="vehicle-list" class="list"></div>
 
     <div class="events-head">
-      <small class="muted">Events</small>
+      <small class="muted" id="events-label">Events</small>
       <small class="muted" id="violation-count">0 speeding</small>
     </div>
     <div id="log" class="log"></div>
@@ -69,8 +69,12 @@
 
   <section class="map-wrap">
     <div id="map" class="map"></div>
-    <button class="fit-btn" id="fit-all" type="button">Fit all</button>
+    <div class="map-tools">
+      <button class="tool-btn" id="fit-all" type="button">Fit all</button>
+      <button class="tool-btn" id="open-drawer" type="button">Insights</button>
+    </div>
     <div id="detail" class="detail" hidden></div>
+    <div id="drawer" class="drawer" hidden></div>
   </section>
 </main>
 

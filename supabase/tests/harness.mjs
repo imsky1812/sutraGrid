@@ -48,16 +48,19 @@ const BOOTSTRAP = `
     grant all on tables to anon, authenticated, service_role;
 `;
 
-/** Boot a fresh database with all migrations applied, in filename order. */
+/**
+ * Boot a database with all migrations applied, in filename order.
+ *
+ * Each test gets its own instance. Snapshotting the migrated state via
+ * dumpDataDir/loadDataDir was tried to avoid replaying migrations per test and
+ * was slower, not faster, so this stays deliberately simple.
+ */
 export async function freshDb() {
   const db = new PGlite();
   await db.exec(BOOTSTRAP);
 
   const files = (await readdir(MIGRATIONS_DIR)).filter((f) => f.endsWith('.sql')).sort();
-
-  if (files.length === 0) {
-    throw new Error(`No migrations found in ${MIGRATIONS_DIR}`);
-  }
+  if (files.length === 0) throw new Error(`No migrations found in ${MIGRATIONS_DIR}`);
 
   for (const file of files) {
     const sql = await readFile(join(MIGRATIONS_DIR, file), 'utf8');
