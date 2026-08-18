@@ -15,7 +15,18 @@ export type Deps = {
   fetchImpl: typeof fetch;
 };
 
-const DIRECTIONS_URL = 'https://maps.googleapis.com/maps/api/directions/json';
+// Routes API, not the legacy Directions API. Google Cloud projects created from
+// early 2025 onward cannot enable the legacy endpoint at all — it answers
+// REQUEST_DENIED with "You're calling a legacy API, which is not enabled for
+// your project", regardless of the key.
+const ROUTES_URL = 'https://routes.googleapis.com/directions/v2:computeRoutes';
+
+type RoutesResponse = {
+  routes?: { polyline?: { encodedPolyline?: string } }[];
+  error?: { status?: string; message?: string };
+};
+
+const point = (p: LatLng) => ({ latitude: p.latitude, longitude: p.longitude });
 
 function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -61,28 +72,46 @@ export async function handler(req: Request, deps: Deps): Promise<Response> {
     );
   }
 
-  const url = new URL(DIRECTIONS_URL);
-  url.searchParams.set('origin', `${body.origin.latitude},${body.origin.longitude}`);
-  url.searchParams.set('destination', `${body.destination.latitude},${body.destination.longitude}`);
-  url.searchParams.set('mode', 'driving');
-  url.searchParams.set('key', deps.apiKey);
-
-  let data: { status?: string; routes?: { overview_polyline?: { points?: string } }[] };
+  // The key travels in a header here rather than the query string, so it is
+  // less likely to end up in an upstream error message or a proxy log.
+  let response: Response;
   try {
-    const upstream = await deps.fetchImpl(url.toString());
-    data = await upstream.json();
+    response = await deps.fetchImpl(ROUTES_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': deps.apiKey,
+        // Ask for only the encoded polyline. Without a field mask the Routes
+        // API rejects the request outright.
+        'X-Goog-FieldMask': 'routes.polyline.encodedPolyline',
+      },
+      body: JSON.stringify({
+        origin: { location: { latLng: point(body.origin) } },
+        destination: { location: { latLng: point(body.destination) } },
+        travelMode: 'DRIVE',
+      }),
+    });
   } catch {
-    // The thrown error can quote the request URL, key included, so it is not
-    // surfaced to the caller.
+    // A thrown fetch error can quote the request, so it is not passed on.
     return json({ error: 'Directions request failed.' }, 502);
   }
 
-  const points = data.routes?.[0]?.overview_polyline?.points;
-  if (data.status !== 'OK' || !points) {
-    // Only the status code is echoed. It is a fixed enum from Google and
-    // carries no request details.
-    return json({ error: `Directions failed: ${data.status ?? 'UNKNOWN'}` }, 502);
+  let data: RoutesResponse;
+  try {
+    data = await response.json();
+  } catch {
+    return json({ error: 'Directions returned an unreadable response.' }, 502);
   }
+
+  if (!response.ok) {
+    // Echo the status enum only. Google's message can name the project and
+    // quote request details, so it is logged rather than returned.
+    console.error('[directions] upstream error', data?.error?.status ?? response.status);
+    return json({ error: `Directions failed: ${data?.error?.status ?? response.status}` }, 502);
+  }
+
+  const points = data.routes?.[0]?.polyline?.encodedPolyline;
+  if (!points) return json({ error: 'Directions failed: ZERO_RESULTS' }, 502);
 
   return json({ polyline: points }, 200);
 }
