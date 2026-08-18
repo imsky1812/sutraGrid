@@ -4,7 +4,8 @@
   "type": "module",
   "description": "Schema and RLS tests run against PGlite, so no Docker or hosted database is needed.",
   "scripts": {
-    "test": "node --test"
+    "_comment": "Concurrency is pinned to 1: each test boots its own WASM Postgres, and running test files in parallel exhausts memory and crashes the runner.",
+    "test": "node --test --test-concurrency=1"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.5"

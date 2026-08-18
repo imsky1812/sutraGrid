@@ -31,6 +31,10 @@
 - **Migrations must run on both PGlite and Supabase.** Anything Supabase-specific
   (for example `alter publication supabase_realtime`) has to be guarded so it is
   skipped when the object is absent.
+- **Schema tests run with `--test-concurrency=1`.** Each test boots its own WASM
+  Postgres; letting `node --test` run test files in parallel exhausts memory and
+  crashes the runner with a V8 fatal error rather than a test failure. Already
+  set in `supabase/tests/package.json`.
 - **Google Maps and Directions keys are not yet available.** Tasks 1-9 must not block on them. Only Task 10's on-device map render requires the Maps key.
 
 ---
