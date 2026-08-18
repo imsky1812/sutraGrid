@@ -76,7 +76,19 @@ async function checkOperator() {
   return !error && (data ?? []).length > 0;
 }
 
+let consoleStarted = false;
+
 async function enterConsole() {
+  // A stored session starts the console on load, and signing in starts it
+  // again. The second run reused the already-subscribed Realtime channel, which
+  // rejects handlers added after subscribe().
+  if (consoleStarted) {
+    $('gate').hidden = true;
+    $('console').hidden = false;
+    return;
+  }
+  consoleStarted = true;
+
   state.isOperator = await checkOperator();
 
   const { data: limitRow } = await supabase
@@ -109,6 +121,7 @@ $('gate-form').addEventListener('submit', async (event) => {
     else await enterConsole();
   } catch (e) {
     // Anything thrown past this point used to hang the button on "Signing in".
+    consoleStarted = false;
     console.error('[sutra] sign-in failed', e);
     gateError(`Signed in, but the console failed to start: ${e?.message ?? e}`);
     $('gate').hidden = false;
@@ -858,7 +871,9 @@ async function startConsole() {
   renderFleet();
   loadViolationCount();
 
-  supabase
+  supabase.getChannels().forEach((channel) => supabase.removeChannel(channel));
+
+  state.channel = supabase
     .channel('sutra-fleet')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'vehicle_positions' }, (payload) => {
       if (payload.eventType === 'DELETE') {
@@ -910,6 +925,7 @@ async function startConsole() {
 supabase.auth.getSession().then(({ data }) => {
   if (data.session) {
     enterConsole().catch((e) => {
+      consoleStarted = false;
       console.error('[sutra] console failed to start', e);
       $('gate').hidden = false;
       $('console').hidden = true;
