@@ -274,3 +274,10 @@ textarea.field-sm { resize: vertical; min-height: 76px; }
   .shell { grid-template-columns: 1fr; grid-template-rows: 46% 1fr; }
   .drawer { inset: 12px; width: auto; }
 }
+
+.link-btn {
+  background: none; border: none; color: var(--muted);
+  font-family: inherit; font-size: 12.5px; cursor: pointer;
+  padding: 6px; text-decoration: underline; text-underline-offset: 3px;
+}
+.link-btn:hover { color: var(--ink); }

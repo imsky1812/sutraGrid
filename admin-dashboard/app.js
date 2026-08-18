@@ -161,6 +161,48 @@ $('gate-signup').addEventListener('click', async () => {
   await enterConsole();
 });
 
+$('gate-reset').addEventListener('click', async () => {
+  $('gate-error').hidden = true;
+  const email = $('email').value.trim();
+  if (!email) return gateError('Enter your email address first, then press this.');
+
+  const button = $('gate-reset');
+  button.disabled = true;
+  button.textContent = 'Sending…';
+
+  // The link returns here, where the recovery session is picked up below.
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin + window.location.pathname,
+  });
+
+  button.disabled = false;
+  button.textContent = 'Forgot your password?';
+
+  // Whether the address exists is not disclosed, so the message is the same
+  // either way.
+  gateError(error ? error.message : 'If that address has an account, a reset link is on its way.');
+});
+
+/**
+ * Supabase returns from a reset link with a recovery session already active, so
+ * the only thing left is to collect a new password.
+ */
+supabase.auth.onAuthStateChange(async (event) => {
+  if (event !== 'PASSWORD_RECOVERY') return;
+
+  const next = window.prompt('Enter a new password (at least 6 characters)');
+  if (!next || next.length < 6) {
+    gateError('Password not changed. It must be at least 6 characters.');
+    return;
+  }
+
+  const { error } = await supabase.auth.updateUser({ password: next });
+  if (error) return gateError(error.message);
+
+  gateError('Password updated. Signing you in…');
+  await enterConsole();
+});
+
 $('sign-out').addEventListener('click', async () => {
   await supabase.auth.signOut();
   location.reload();
