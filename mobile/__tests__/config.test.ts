@@ -1,35 +1,51 @@
+const URL_KEY = 'EXPO_PUBLIC_SUPABASE_URL';
+const ANON_KEY = 'EXPO_PUBLIC_SUPABASE_ANON_KEY';
+
 describe('config', () => {
-  const ORIGINAL = { ...process.env };
+  const original: Record<string, string | undefined> = {
+    [URL_KEY]: process.env[URL_KEY],
+    [ANON_KEY]: process.env[ANON_KEY],
+  };
+
+  // Individual keys are restored rather than reassigning process.env wholesale:
+  // replacing the object detaches it from the real environment and later
+  // deletes stop having any effect, which shows up as tests that mysteriously
+  // stop throwing after the first one.
+  const set = (key: string, value: string | undefined) => {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  };
+
+  beforeEach(() => {
+    jest.resetModules();
+  });
 
   afterEach(() => {
-    process.env = { ...ORIGINAL };
+    set(URL_KEY, original[URL_KEY]);
+    set(ANON_KEY, original[ANON_KEY]);
   });
 
   it('throws a named error when the Supabase URL is missing', () => {
-    delete process.env.EXPO_PUBLIC_SUPABASE_URL;
-    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY = 'key';
-    jest.resetModules();
-    expect(() => require('../src/config')).toThrow(/EXPO_PUBLIC_SUPABASE_URL/);
+    set(URL_KEY, undefined);
+    set(ANON_KEY, 'key');
+    expect(() => require('../src/config')).toThrow(new RegExp(URL_KEY));
   });
 
   it('throws a named error when the anon key is missing', () => {
-    process.env.EXPO_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
-    delete process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
-    jest.resetModules();
-    expect(() => require('../src/config')).toThrow(/EXPO_PUBLIC_SUPABASE_ANON_KEY/);
+    set(URL_KEY, 'https://example.supabase.co');
+    set(ANON_KEY, undefined);
+    expect(() => require('../src/config')).toThrow(new RegExp(ANON_KEY));
   });
 
   it('points at copying .env.example, so the fix is obvious', () => {
-    delete process.env.EXPO_PUBLIC_SUPABASE_URL;
-    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY = 'key';
-    jest.resetModules();
+    set(URL_KEY, undefined);
+    set(ANON_KEY, 'key');
     expect(() => require('../src/config')).toThrow(/\.env\.example/);
   });
 
   it('exposes url and key when both are set', () => {
-    process.env.EXPO_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
-    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY = 'anon-key';
-    jest.resetModules();
+    set(URL_KEY, 'https://example.supabase.co');
+    set(ANON_KEY, 'anon-key');
     const { config } = require('../src/config');
     expect(config.supabaseUrl).toBe('https://example.supabase.co');
     expect(config.supabaseAnonKey).toBe('anon-key');
