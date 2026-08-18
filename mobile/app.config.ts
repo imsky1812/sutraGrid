@@ -44,13 +44,8 @@ const config: ExpoConfig = {
       'FOREGROUND_SERVICE_LOCATION',
       'POST_NOTIFICATIONS',
     ],
-    config: {
-      googleMaps: {
-        // Supplied at build time. Absent until the key is provisioned, in which
-        // case the map renders grey but the rest of the app still works.
-        apiKey: process.env.GOOGLE_MAPS_ANDROID_KEY ?? '',
-      },
-    },
+    // No maps API key: tiles come from OpenFreeMap and routing from OSRM,
+    // neither of which needs one.
   },
 
   web: {

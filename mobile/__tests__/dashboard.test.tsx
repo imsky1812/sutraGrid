@@ -8,15 +8,19 @@ const mockSetAlertMessage = jest.fn();
 const mockListMyVehicles = jest.fn();
 const mockFetchRoute = jest.fn().mockResolvedValue([]);
 
-jest.mock('react-native-maps', () => {
+jest.mock('@maplibre/maplibre-react-native', () => {
   const React2 = require('react');
   const { View } = require('react-native');
-  const MapView = (p: any) => React2.createElement(View, { testID: 'map' }, p.children);
+  const passthrough = (testID: string) => (p: any) =>
+    React2.createElement(View, { testID }, p.children ?? null);
   return {
     __esModule: true,
-    default: MapView,
-    Marker: (p: any) => React2.createElement(View, { testID: 'marker' }, p.children),
-    Polyline: () => React2.createElement(View, { testID: 'polyline' }),
+    Map: passthrough('map'),
+    Camera: passthrough('camera'),
+    UserLocation: passthrough('user-location'),
+    GeoJSONSource: passthrough('route-source'),
+    Layer: passthrough('route-layer'),
+    Marker: passthrough('marker'),
   };
 });
 

@@ -1,10 +1,12 @@
-// Deno entry point for the Directions Edge Function.
+// Deno entry point for the routing Edge Function.
 //
 // All logic lives in handler.ts, which has no Deno globals and is unit tested
 // under Node. This file is wiring only.
 //
 // Deploy:  npx supabase functions deploy directions
-// Secret:  npx supabase secrets set GOOGLE_DIRECTIONS_KEY=...
+//
+// No API key is involved. Set ROUTER_URL to point at your own OSRM instance:
+//   npx supabase secrets set ROUTER_URL=https://osrm.example.com
 
 // @ts-ignore - Deno global is provided by the Supabase Edge runtime.
 declare const Deno: {
@@ -12,11 +14,11 @@ declare const Deno: {
   serve(handler: (req: Request) => Promise<Response>): void;
 };
 
-import { handler } from './handler.ts';
+import { handler, DEFAULT_ROUTER } from './handler.ts';
 
 Deno.serve((req: Request) =>
   handler(req, {
-    apiKey: Deno.env.get('GOOGLE_DIRECTIONS_KEY') ?? '',
+    routerUrl: Deno.env.get('ROUTER_URL') ?? DEFAULT_ROUTER,
     fetchImpl: fetch,
   }),
 );

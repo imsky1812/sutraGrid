@@ -1,32 +1,33 @@
-// Request handler for the Directions Edge Function.
+// Request handler for the routing Edge Function.
 //
 // Deliberately free of Deno globals: dependencies come in as parameters so this
 // can be unit tested under Node. index.ts supplies the real ones.
 //
-// The purpose of this proxy is that the Google Directions key stays server-side
-// instead of being bundled into the APK. That means nothing from upstream may
-// be echoed verbatim — the key travels in the request URL, so an upstream error
-// message can contain it.
+// Routing goes through OSRM, which needs no API key and no account. The app
+// calls this function rather than the router directly so the provider can be
+// swapped — to a self-hosted OSRM, OpenRouteService, or Valhalla — by
+// redeploying the function, with no app rebuild and no store release.
 
 export type LatLng = { latitude: number; longitude: number };
 
 export type Deps = {
-  apiKey: string;
+  /** Base URL of an OSRM-compatible router, without a trailing slash. */
+  routerUrl: string;
   fetchImpl: typeof fetch;
 };
 
-// Routes API, not the legacy Directions API. Google Cloud projects created from
-// early 2025 onward cannot enable the legacy endpoint at all — it answers
-// REQUEST_DENIED with "You're calling a legacy API, which is not enabled for
-// your project", regardless of the key.
-const ROUTES_URL = 'https://routes.googleapis.com/directions/v2:computeRoutes';
+/**
+ * The public OSRM demo server. It is free and unauthenticated but explicitly
+ * intended for light use, with no availability guarantee. Point `routerUrl` at
+ * your own instance before relying on it for anything real.
+ */
+export const DEFAULT_ROUTER = 'https://router.project-osrm.org';
 
-type RoutesResponse = {
-  routes?: { polyline?: { encodedPolyline?: string } }[];
-  error?: { status?: string; message?: string };
+type OsrmResponse = {
+  code?: string;
+  message?: string;
+  routes?: { geometry?: string; distance?: number; duration?: number }[];
 };
-
-const point = (p: LatLng) => ({ latitude: p.latitude, longitude: p.longitude });
 
 function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -52,12 +53,6 @@ function isLatLng(value: unknown): value is LatLng {
 }
 
 export async function handler(req: Request, deps: Deps): Promise<Response> {
-  if (!deps.apiKey) {
-    // Fail closed. Calling Google without a key would just return
-    // REQUEST_DENIED, which is a confusing way to report a misconfiguration.
-    return json({ error: 'Directions API key is not configured on the server.' }, 500);
-  }
-
   let body: { origin?: unknown; destination?: unknown };
   try {
     body = await req.json();
@@ -72,46 +67,50 @@ export async function handler(req: Request, deps: Deps): Promise<Response> {
     );
   }
 
-  // The key travels in a header here rather than the query string, so it is
-  // less likely to end up in an upstream error message or a proxy log.
+  // OSRM takes lon,lat — the reverse of the order used everywhere else in this
+  // codebase. Getting it backwards yields a plausible-looking route in the
+  // wrong hemisphere rather than an error.
+  const coords =
+    `${body.origin.longitude},${body.origin.latitude};` +
+    `${body.destination.longitude},${body.destination.latitude}`;
+
+  const url =
+    `${deps.routerUrl}/route/v1/driving/${coords}` +
+    `?overview=full&geometries=polyline&alternatives=false&steps=false`;
+
   let response: Response;
   try {
-    response = await deps.fetchImpl(ROUTES_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': deps.apiKey,
-        // Ask for only the encoded polyline. Without a field mask the Routes
-        // API rejects the request outright.
-        'X-Goog-FieldMask': 'routes.polyline.encodedPolyline',
-      },
-      body: JSON.stringify({
-        origin: { location: { latLng: point(body.origin) } },
-        destination: { location: { latLng: point(body.destination) } },
-        travelMode: 'DRIVE',
-      }),
-    });
+    response = await deps.fetchImpl(url);
   } catch {
-    // A thrown fetch error can quote the request, so it is not passed on.
-    return json({ error: 'Directions request failed.' }, 502);
+    return json({ error: 'Routing request failed.' }, 502);
   }
 
-  let data: RoutesResponse;
+  let data: OsrmResponse;
   try {
     data = await response.json();
   } catch {
-    return json({ error: 'Directions returned an unreadable response.' }, 502);
+    return json({ error: 'Routing returned an unreadable response.' }, 502);
   }
 
-  if (!response.ok) {
-    // Echo the status enum only. Google's message can name the project and
-    // quote request details, so it is logged rather than returned.
-    console.error('[directions] upstream error', data?.error?.status ?? response.status);
-    return json({ error: `Directions failed: ${data?.error?.status ?? response.status}` }, 502);
+  if (data.code !== 'Ok') {
+    // OSRM's `code` is a fixed enum (NoRoute, InvalidQuery, ...). The free-text
+    // `message` is logged rather than returned, so upstream wording never
+    // becomes part of this contract.
+    if (data.message) console.error('[directions] router said:', data.message);
+    return json({ error: `Routing failed: ${data.code ?? 'UNKNOWN'}` }, 502);
   }
 
-  const points = data.routes?.[0]?.polyline?.encodedPolyline;
-  if (!points) return json({ error: 'Directions failed: ZERO_RESULTS' }, 502);
+  const geometry = data.routes?.[0]?.geometry;
+  if (!geometry) return json({ error: 'Routing failed: NoRoute' }, 502);
 
-  return json({ polyline: points }, 200);
+  // OSRM's polyline encoding is the same algorithm Google uses, so the client's
+  // existing decoder applies unchanged.
+  return json(
+    {
+      polyline: geometry,
+      distanceMeters: data.routes?.[0]?.distance ?? null,
+      durationSeconds: data.routes?.[0]?.duration ?? null,
+    },
+    200,
+  );
 }

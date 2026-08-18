@@ -45,8 +45,8 @@ something a driver can claim.
   joining to `vehicles`, so a modified client has nothing to forge.
 - Range checks on latitude, longitude, speed and heading are database
   constraints, not application code, so they cannot be bypassed.
-- The Google Directions key lives in an Edge Function's environment and never
-  ships in the APK.
+- Routing runs through an Edge Function so the provider can be swapped without
+  an app rebuild. It uses OSRM, which needs no key at all.
 
 To authorize a vehicle, run this in the Supabase SQL editor:
 
@@ -66,14 +66,17 @@ No key is committed. Copy the examples and fill them in:
 
 ```bash
 cp mobile/.env.example        mobile/.env
-cp supabase/.env.example      supabase/.env       # documents the function secret
 cp admin-dashboard/config.example.js admin-dashboard/config.js
 ```
 
-> **Google Maps keys are not secret.** A browser key is visible to anyone who
-> loads the page; an Android key ships inside the APK. Protection comes from
-> restriction — restrict the browser key by HTTP referrer and the Android key by
-> package name (`com.sutra.vehicle`) and signing SHA-1.
+The mobile app needs exactly two values, both Supabase. **There is no maps key**
+— tiles come from OpenFreeMap and routing from OSRM, neither of which requires
+an account, a key, or a quota. Nothing to restrict, rotate, or leak.
+
+`supabase/.env` is optional and holds no secret; see `supabase/.env.example`.
+
+> The legacy `admin-dashboard/` still uses Google Maps and still needs a browser
+> key in its `config.js`. That component has not been migrated.
 
 ### 2. Database
 
@@ -102,7 +105,6 @@ npx eas init                     # writes the project id into app.config.ts
 # these have to live as EAS secrets.
 npx eas secret:create --name EXPO_PUBLIC_SUPABASE_URL      --value https://<ref>.supabase.co
 npx eas secret:create --name EXPO_PUBLIC_SUPABASE_ANON_KEY --value <anon key>
-npx eas secret:create --name GOOGLE_MAPS_ANDROID_KEY       --value <maps key>
 ```
 
 Then, for an installable APK:
@@ -138,8 +140,8 @@ Two things this path needs that EAS does not:
   native work, so the APK will not install on an x86_64 emulator. Add `x86_64`
   to `reactNativeArchitectures` in `scripts/tune-gradle.mjs` if you need one.
 
-Set `GOOGLE_MAPS_ANDROID_KEY` before `prebuild` to embed the Maps key. Without
-it the app builds and runs, but map tiles render grey.
+No map key is needed at any point: tiles come from OpenFreeMap and routing from
+OSRM.
 
 ### 4. Operator dashboard (legacy path)
 

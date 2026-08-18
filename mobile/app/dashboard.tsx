@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
-import MapView, { Marker, Polyline } from 'react-native-maps';
+import { Camera, GeoJSONSource, Layer, Map, Marker, UserLocation } from '@maplibre/maplibre-react-native';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { StatusBar } from 'expo-status-bar';
 import { router, useLocalSearchParams } from 'expo-router';
 import { listMyVehicles, Vehicle } from '../src/vehicles';
 import { setAlertMessage, setDestination, startTelemetry, stopTelemetry } from '../src/telemetry';
 import { fetchRoute } from '../src/directions';
-import { darkMapStyle } from '../src/mapStyle';
+import { MAP_STYLE_URL, ROUTE_COLOR, ROUTE_WIDTH } from '../src/mapStyle';
 import { AccentAction, Badge, Card, Chip, Field, Label, NavBar, PillButton } from '../src/ui';
 import { color, radius, shadow, space, type } from '../src/theme';
 import type { LatLng } from '../src/polyline';
@@ -150,25 +150,39 @@ export default function Dashboard() {
     <View style={styles.screen}>
       <StatusBar style="light" />
 
-      <MapView
-        style={StyleSheet.absoluteFill}
-        customMapStyle={darkMapStyle}
-        showsUserLocation
-        showsMyLocationButton={false}
-        initialRegion={{ ...BANGALORE, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
-      >
-        {/* The route is the only saturated thing on the map, by design. */}
-        {route.length > 0 && (
-          <Polyline coordinates={route} strokeColor={color.accent} strokeWidth={5} />
+      <Map style={StyleSheet.absoluteFill} mapStyle={MAP_STYLE_URL} attribution logo={false}>
+        <Camera zoom={13} center={[BANGALORE.longitude, BANGALORE.latitude]} />
+        <UserLocation />
+
+        {/* The route is the only saturated thing on the map, by design.
+            GeoJSON is lon,lat — the reverse of the order used elsewhere here. */}
+        {route.length > 1 && (
+          <GeoJSONSource
+            id="route"
+            data={{
+              type: 'Feature',
+              properties: {},
+              geometry: {
+                type: 'LineString',
+                coordinates: route.map((p) => [p.longitude, p.latitude]),
+              },
+            }}
+          >
+            <Layer
+              id="route-line"
+              type="line"
+              layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+              paint={{ 'line-color': ROUTE_COLOR, 'line-width': ROUTE_WIDTH }}
+            />
+          </GeoJSONSource>
         )}
+
         {hasDestination && (
-          <Marker
-            coordinate={{ latitude: Number(destLat), longitude: Number(destLng) }}
-            title={destName || 'Destination'}
-            pinColor={color.accent}
-          />
+          <Marker id="destination" lngLat={[Number(destLng), Number(destLat)]}>
+            <View style={styles.destinationPin} />
+          </Marker>
         )}
-      </MapView>
+      </Map>
 
       {/* Floating status bar, echoing the reference's top search pill. */}
       <View style={styles.topBar}>
@@ -338,6 +352,14 @@ const styles = StyleSheet.create({
     ...shadow.float,
   },
   liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: color.accent },
+  destinationPin: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: color.accent,
+    borderWidth: 3,
+    borderColor: color.canvas,
+  },
   statusVehicle: { color: color.ink, fontSize: 14, fontWeight: '700', letterSpacing: -0.2 },
   statusMeta: { color: color.muted, fontSize: 11 },
 

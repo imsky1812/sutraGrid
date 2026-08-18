@@ -1,35 +1,18 @@
 /**
- * Dark map styling to match the reference: a near-black city with the green
- * cast of the app canvas, almost no labels, and no points of interest.
+ * Map tiles.
  *
- * Everything here is tuned so the lime route is the only saturated thing on
- * screen. A driver following a corridor does not need restaurant pins, and each
- * extra label competes with the one line that matters.
+ * OpenFreeMap serves OpenStreetMap-derived vector tiles with no API key, no
+ * account and no usage quota. That removes the whole key-management surface
+ * from the map: nothing to restrict, nothing to rotate, nothing to leak.
+ *
+ * Their `dark` style is close to the app canvas already. Point this at a
+ * self-hosted style JSON if the map ever needs to match the palette exactly.
  */
-export const darkMapStyle = [
-  { elementType: 'geometry', stylers: [{ color: '#0D0F0B' }] },
-  { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#6B6F65' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#0D0F0B' }] },
+export const MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/dark';
 
-  { featureType: 'administrative', elementType: 'geometry.stroke', stylers: [{ color: '#2A2F24' }] },
-  { featureType: 'administrative.land_parcel', stylers: [{ visibility: 'off' }] },
-  { featureType: 'administrative.neighborhood', stylers: [{ visibility: 'off' }] },
+/** Lime, matching color.accent. The route is the only saturated thing drawn. */
+export const ROUTE_COLOR = '#D7F94A';
+export const ROUTE_WIDTH = 5;
 
-  { featureType: 'landscape.man_made', elementType: 'geometry', stylers: [{ color: '#141711' }] },
-  { featureType: 'landscape.natural', elementType: 'geometry', stylers: [{ color: '#111410' }] },
-
-  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
-  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#161B12' }, { visibility: 'on' }] },
-
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#20241B' }] },
-  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#171A13' }] },
-  { featureType: 'road', elementType: 'labels', stylers: [{ visibility: 'off' }] },
-  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#2A2F24' }] },
-  { featureType: 'road.highway', elementType: 'labels', stylers: [{ visibility: 'simplified' }] },
-
-  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
-
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0A0C08' }] },
-  { featureType: 'water', elementType: 'labels.text', stylers: [{ visibility: 'off' }] },
-];
+/** Attribution is required by the ODbL licence covering OpenStreetMap data. */
+export const MAP_ATTRIBUTION = '© OpenStreetMap contributors';
