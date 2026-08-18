@@ -1,16 +1,11 @@
-// Copy this file to admin-dashboard/config.js and fill in real values.
-// config.js is gitignored — never commit it.
+// Copy to admin-dashboard/config.js and fill in. config.js is gitignored.
 //
-// Note: a browser-side Maps key is always visible to anyone who loads the page.
-// The protection is not secrecy, it is restriction: in Google Cloud Console set
-// an HTTP-referrer restriction and limit the key to the Maps JavaScript API.
+// Both values are Supabase and both are publishable: the anon key is designed
+// to be public and is constrained by row-level security. What an operator can
+// actually see is decided by the `operators` table, not by this file.
+//
+// There is no maps key. Tiles come from OpenFreeMap, which needs no account.
 window.SUTRA_CONFIG = {
-    // Google Maps JavaScript API key, referrer-restricted.
-    MAPS_API_KEY: 'your-maps-js-api-key',
-
-    // Must match OPERATOR_KEY in backend-mock/.env.
-    OPERATOR_KEY: 'change-me-operator-key',
-
-    // host:port of the mock backend.
-    BACKEND_HOST: 'localhost:3000'
+    SUPABASE_URL: 'https://your-project-ref.supabase.co',
+    SUPABASE_ANON_KEY: 'your-anon-key',
 };

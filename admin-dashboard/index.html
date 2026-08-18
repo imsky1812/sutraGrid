@@ -1,219 +1,78 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SUTRA Central Control Dashboard</title>
-    <link rel="stylesheet" href="style.css">
-</head>
-<body>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SUTRA Control</title>
 
-    <!-- Upper Header -->
-    <header class="glass-panel">
-        <div class="logo-section">
-            <h1>SUTRA TRAFFIC CONTROL</h1>
-            <p>Real-Time Smart Traffic System Dashboard</p>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.css">
+<link rel="stylesheet" href="style.css">
+
+<!-- Sign-in gate. An operator is a Supabase user listed in the operators table. -->
+<div id="gate" class="gate">
+  <form id="gate-form" class="gate-card" autocomplete="on">
+    <span class="brand"><span class="brand-mark">◎</span> sutra control</span>
+    <h1>Operator sign-in</h1>
+    <p class="muted">Live fleet telemetry. Access is granted per account.</p>
+
+    <label class="label" for="email">Email</label>
+    <input class="field" id="email" type="email" autocomplete="username" placeholder="ops@example.com" required>
+
+    <label class="label" for="password">Password</label>
+    <input class="field" id="password" type="password" autocomplete="current-password" placeholder="Password" required>
+
+    <p id="gate-error" class="error" hidden></p>
+    <button class="pill accent" id="gate-submit" type="submit">Sign in</button>
+  </form>
+</div>
+
+<main id="console" class="shell" hidden>
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <span class="brand"><span class="brand-mark">◎</span> sutra control</span>
+      <button class="icon-btn" id="sign-out" title="Sign out" aria-label="Sign out">&#9096;</button>
+    </div>
+
+    <div class="search">
+      <input id="search" type="search" placeholder="Search vehicle or driver..." aria-label="Search fleet">
+      <span class="search-icon" aria-hidden="true">&#9906;</span>
+    </div>
+
+    <div class="filters">
+      <div class="filter-group">
+        <small class="muted">Show me</small>
+        <div class="chips" id="filter-chips" role="group" aria-label="Filter fleet">
+          <button class="chip active" data-filter="all" type="button">All</button>
+          <button class="chip" data-filter="emergency" type="button">Emergency</button>
+          <button class="chip" data-filter="speeding" type="button">Speeding</button>
         </div>
-
-        <nav class="nav-tabs">
-            <button class="tab-btn active" data-tab="all-tab">All Systems</button>
-            <button class="tab-btn" data-tab="map-tab">Live Traffic</button>
-            <button class="tab-btn" data-tab="emergency-tab">Emergency Corridor</button>
-            <button class="tab-btn" data-tab="violations-tab">Rule Violations</button>
-            <button class="tab-btn" data-tab="simulator-tab">Control Simulator</button>
-        </nav>
-
-        <div class="connection-status">
-            <div id="status-dot" class="status-dot"></div>
-            <span id="status-text">DISCONNECTED</span>
+      </div>
+      <div class="filter-group">
+        <small class="muted">Sort by</small>
+        <div class="chips" id="sort-chips" role="group" aria-label="Sort fleet">
+          <button class="chip active" data-sort="plate" type="button">Plate</button>
+          <button class="chip" data-sort="speed" type="button">Speed</button>
         </div>
-    </header>
+      </div>
+    </div>
 
-    <!-- Main Workspace -->
-    <main class="dashboard-grid focus-all">
+    <div class="list-head">
+      <strong id="fleet-count">0 vehicles</strong>
+      <span class="conn"><i id="live-dot" class="dot"></i><small id="conn-state">connecting</small></span>
+    </div>
 
-        <!-- COLUMN 1: LEFT SIDEBAR -->
-        <div class="col-left">
-            <!-- 1. System Analytics Widget -->
-            <section class="widget-card glass-panel w-analytics">
-                <div class="widget-header">
-                    <h2>System Analytics</h2>
-                </div>
-                <div class="widget-body">
-                    <div class="analytics-gauge">
-                        <span style="font-size: 10px; color: var(--text-secondary);">FLEET AVERAGE SPEED</span>
-                        <div class="gauge-bar-bg">
-                            <div id="avg-speed-bar" class="gauge-bar-fill"></div>
-                        </div>
-                        <span id="avg-speed-value" style="font-family: Orbitron; font-size: 13px; font-weight: bold; margin-top: 4px; display: block;">0 km/h</span>
-                    </div>
-                    
-                    <div class="analytics-gauge" style="margin-top: 8px;">
-                        <span style="font-size: 10px; color: var(--text-secondary);">CONNECTION PERFORMANCE <span class="mock-badge">MOCK</span></span>
-                        <div class="gauge-bar-bg">
-                            <div id="latency-bar" class="gauge-bar-fill"></div>
-                        </div>
-                        <span id="latency-value" style="font-family: Orbitron; font-size: 13px; font-weight: bold; margin-top: 4px; display: block;">98% (placeholder)</span>
-                        <span class="mock-note">Placeholder value derived from vehicle count. No latency is measured.</span>
-                    </div>
+    <div id="vehicle-list" class="list"></div>
 
-                    <button class="btn" style="width: 100%; margin-top: 12px;" id="optimizer-btn">Show Bypass Overlay (Mock)</button>
-                    <span class="mock-note">Draws an offset line per routed vehicle. No routing engine, no traffic data, nothing is rerouted.</span>
-                </div>
-            </section>
+    <div class="events-head">
+      <small class="muted">Events</small>
+      <small class="muted" id="violation-count">0 speeding</small>
+    </div>
+    <div id="log" class="log"></div>
+  </aside>
 
-            <!-- 2. Active Vehicles Widget -->
-            <section class="widget-card glass-panel w-vehicles">
-                <div class="widget-header">
-                    <h2>Active Vehicles</h2>
-                    <span id="vehicle-count" class="connection-status">0 Active</span>
-                </div>
-                <div class="widget-body">
-                    <div id="vehicle-list" class="list-container">
-                        <p class="text-secondary" style="text-align: center; padding: 20px; font-size: 12px;">No vehicles online. Start the APK client to stream telemetry.</p>
-                    </div>
-                </div>
-            </section>
-        </div>
+  <section class="map-wrap">
+    <div id="map" class="map"></div>
+    <button class="fit-btn" id="fit-all" type="button">Fit all</button>
+    <div id="detail" class="detail" hidden></div>
+  </section>
+</main>
 
-        <!-- COLUMN 2: CENTRAL MAP & LOGS -->
-        <div class="col-center">
-            <!-- 3. Google Maps View Widget -->
-            <section class="widget-card glass-panel w-map">
-                <!-- Dynamic Overlay for Critical Emergency Alerts -->
-                <div id="emergency-banner" class="alert-overlay-banner">
-                    <span class="alert-icon-pulse">🚨</span>
-                    <div class="alert-message-content">
-                        <h4 id="emergency-banner-title">EMERGENCY VEHICLE APPROACHING</h4>
-                        <p id="emergency-banner-text">Vehicle ID: MH-12-EX-4321 has requested green corridor routing.</p>
-                    </div>
-                    <button class="alert-close-btn">Acknowledge</button>
-                </div>
-                <div class="map-container">
-                    <div id="map"></div>
-                </div>
-            </section>
-
-            <!-- 4. Unified Operations Live Logs Widget -->
-            <section class="widget-card glass-panel w-logs">
-                <div class="widget-header">
-                    <h2>Operations Control Feed</h2>
-                </div>
-                <div class="widget-body">
-                    <div id="violation-logs" class="logs-container">
-                        <p class="text-secondary" style="text-align: center; padding: 20px; font-size: 12px;">No traffic events logged in this session.</p>
-                    </div>
-                </div>
-            </section>
-        </div>
-
-        <!-- COLUMN 3: RIGHT SIDEBAR -->
-        <div class="col-right">
-            <!-- 5. Mock Client Simulator Widget -->
-            <section class="widget-card glass-panel w-simulator">
-                <div class="widget-header">
-                    <h2>Browser Client Simulator</h2>
-                </div>
-                <div class="widget-body">
-                    <div class="form-group">
-                        <label for="sim-vehicle-id">Vehicle ID / Number</label>
-                        <input type="text" id="sim-vehicle-id" value="KA-03-EM-8899">
-                    </div>
-
-                    <div class="form-group" style="margin-top: 6px;">
-                        <label for="sim-driver-name">Driver Name</label>
-                        <input type="text" id="sim-driver-name" value="Amit Sharma">
-                    </div>
-
-                    <div class="form-group" style="margin-top: 6px;">
-                        <label for="sim-vehicle-type">Vehicle Type</label>
-                        <select id="sim-vehicle-type" onchange="toggleSimType()">
-                            <option value="NORMAL">Normal Vehicle</option>
-                            <option value="AMBULANCE">Ambulance (Emergency)</option>
-                            <option value="POLICE">Police Cruiser (Emergency)</option>
-                            <option value="FIRE">Fire Engine (Emergency)</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group" style="margin-top: 6px;">
-                        <label for="sim-speed">Speed (km/h)</label>
-                        <input type="number" id="sim-speed" value="65" min="0" max="150">
-                    </div>
-
-                    <div class="form-group" style="margin-top: 6px;">
-                        <label for="sim-emergency-code">Emergency Authorization Code</label>
-                        <input type="password" id="sim-emergency-code" placeholder="Required for emergency types" disabled>
-                    </div>
-
-                    <div class="form-group" style="margin-top: 6px;">
-                        <label for="sim-alert-message">Alert Message (Emergency)</label>
-                        <input type="text" id="sim-alert-message" value="CLEAR PATH IMMEDIATELY - TRANSIT UNDERWAY" disabled>
-                    </div>
-
-                    <button id="sim-start-btn" class="btn btn-active" style="width: 100%; margin-top: 10px;">Start Browser Simulation</button>
-                    
-                    <div style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 8px;">
-                        <label>Simulated Coordinates Path</label>
-                        <div id="sim-coordinate-display" style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.03); padding: 8px; border-radius: 5px; font-family: monospace; font-size: 10px; height: 80px; overflow-y: auto; color: var(--text-secondary); margin-top: 4px;">
-                            [SIMULATION INACTIVE]
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- 6. Emergency Dispatch Card -->
-            <section class="widget-card glass-panel w-emergency">
-                <div class="widget-header">
-                    <h2>Emergency Dispatch</h2>
-                </div>
-                <div class="widget-body">
-                    <div style="background: rgba(255,77,90,0.05); border: 1px solid rgba(255,77,90,0.15); padding: 8px; border-radius: 6px; font-size: 11px; line-height: 1.4;">
-                        <span style="color: var(--red-neon); font-family: 'Orbitron'; font-weight: bold; display: block; margin-bottom: 2px;">Green Corridor Route <span class="mock-badge">MOCK</span></span>
-                        Signal override is not implemented. No traffic controller is contacted; this panel displays the broadcast only.
-                    </div>
-                    
-                    <div class="form-group" style="margin-top: 8px;">
-                        <label>Dispatch Broadcast details</label>
-                        <div id="emergency-dispatch-details" style="font-size: 11.5px; padding: 8px; border-radius: 5px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.02); min-height: 48px;">
-                            <span class="text-secondary">No active emergency broadcasts.</span>
-                        </div>
-                    </div>
-                    
-                    <!-- Hidden container to preserve legacy JS compatibility -->
-                    <div id="emergency-hubs-list" style="display: none;"></div>
-                </div>
-            </section>
-
-            <!-- 7. Rule Violations Card -->
-            <section class="widget-card glass-panel w-violations">
-                <div class="widget-header">
-                    <h2>Rule Violations</h2>
-                </div>
-                <div class="widget-body">
-                    <div style="display: flex; gap: 8px; align-items: center;">
-                        <div style="flex: 0 0 70px; padding: 8px; border-radius: 6px; background: rgba(255,77,90,0.06); border: 1px solid rgba(255,77,90,0.15); text-align: center;">
-                            <div id="speeding-count-stat" style="font-family: 'Orbitron'; font-size: 18px; font-weight: bold; color: var(--red-neon);">0</div>
-                            <span style="font-size: 8px; color: var(--text-secondary); text-transform: uppercase; display: block; margin-top: 2px;">Tickets</span>
-                        </div>
-                        <div style="font-size: 11px; color: var(--text-secondary); line-height: 1.35; flex: 1;">
-                            Speed Limit: <strong>80 km/h</strong>.<br>Violations are counted and logged locally in this browser.
-                        </div>
-                    </div>
-
-                    <div class="form-group" style="flex: 1; display: flex; flex-direction: column; overflow: hidden; margin-top: 8px;">
-                        <label>Simulated dispatch payload <span class="mock-badge">MOCK</span></label>
-                        <span class="mock-note">Generated in-browser to illustrate a payload shape. No request is sent and no police system exists behind it.</span>
-                        <pre id="police-api-feed" style="flex: 1; min-height: 80px; margin-top: 4px;">[WAITING FOR DISPATCH EVENT]</pre>
-                    </div>
-                </div>
-            </section>
-        </div>
-
-    </main>
-
-    <!-- Local, gitignored configuration. Copy config.example.js to config.js. -->
-    <script src="config.js"></script>
-    <!-- app.js injects the Google Maps library using the key from config.js. -->
-    <script src="app.js"></script>
-</body>
-</html>
+<script src="config.js"></script>
+<script type="module" src="app.js"></script>

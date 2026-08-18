@@ -1,876 +1,129 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Sora:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
-
 :root {
-    --bg-primary: #07090e;
-    --bg-secondary: rgba(12, 14, 25, 0.55);
-    --bg-card: rgba(15, 19, 36, 0.35);
-    --border-color: rgba(255, 255, 255, 0.04);
-    --border-hover: rgba(0, 242, 254, 0.25);
-    
-    /* Neon Accent Palettes */
-    --cyan-neon: #00f2fe;
-    --cyan-glow: rgba(0, 242, 254, 0.2);
-    --red-neon: #ff4757;
-    --red-glow: rgba(255, 71, 87, 0.2);
-    --orange-neon: #ffa502;
-    --orange-glow: rgba(255, 165, 2, 0.2);
-    --green-neon: #2ed573;
-    --green-glow: rgba(46, 213, 115, 0.2);
-    
-    --text-primary: #f8fafc;
-    --text-secondary: #64748b;
-    --text-muted: #475569;
-    
-    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-    --transition-speed: 0.2s;
+  /* Shared with the mobile app so the two products read as one system. */
+  --canvas: #0D0F0B;
+  --surface: #161814;
+  --surface-high: #202419;
+  --line: #2A2F24;
+  --accent: #D7F94A;
+  --accent-ghost: rgba(215, 249, 74, 0.14);
+  --ink: #FFFFFF;
+  --muted: #9CA096;
+  --faint: #6B6F65;
+  --danger: #FF6B5A;
+  --on-accent: #0D0F0B;
+  --r-pill: 999px;
 }
 
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
+* { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    background-color: var(--bg-primary);
-    background-image: 
-        radial-gradient(at 0% 0%, rgba(0, 242, 254, 0.03) 0px, transparent 50%),
-        radial-gradient(at 100% 100%, rgba(255, 71, 87, 0.03) 0px, transparent 50%),
-        radial-gradient(at 50% 50%, rgba(15, 19, 36, 0.4) 0px, transparent 70%);
-    color: var(--text-primary);
-    height: 100vh;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-}
-
-/* Glassmorphic Panel Core */
-.glass-panel {
-    background: var(--bg-secondary);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border: 1px solid var(--border-color);
-    border-radius: 12px;
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
-    transition: border-color var(--transition-speed) var(--ease-out), 
-                box-shadow var(--transition-speed) var(--ease-out),
-                transform var(--transition-speed) var(--ease-out),
-                opacity var(--transition-speed) var(--ease-out),
-                filter var(--transition-speed) var(--ease-out);
-}
-
-/* Floating Glass Header */
-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin: 16px 16px 0;
-    padding: 12px 24px;
-    background: rgba(10, 12, 22, 0.6);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border: 1px solid var(--border-color);
-    border-radius: 12px;
-    z-index: 100;
-    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
-}
-
-.logo-section h1 {
-    font-family: 'Sora', sans-serif;
-    font-size: 18px;
-    font-weight: 800;
-    letter-spacing: 1px;
-    background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    text-shadow: 0 0 20px rgba(0, 242, 254, 0.1);
-}
-
-.logo-section p {
-    font-size: 9px;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-    margin-top: 1px;
-    font-weight: 600;
-}
-
-/* Focus Filters */
-.nav-tabs {
-    display: flex;
-    gap: 4px;
-    background: rgba(255, 255, 255, 0.02);
-    padding: 3px;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.02);
-}
-
-.tab-btn {
-    background: transparent;
-    border: none;
-    color: var(--text-secondary);
-    padding: 6px 12px;
-    cursor: pointer;
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 11px;
-    font-weight: 600;
-    border-radius: 6px;
-    transition: transform 0.15s var(--ease-out),
-                color var(--transition-speed) var(--ease-out),
-                background-color var(--transition-speed) var(--ease-out);
-}
-
-.tab-btn:hover {
-    color: var(--text-primary);
-    background: rgba(255, 255, 255, 0.03);
-}
-
-.tab-btn:active {
-    transform: scale(0.96);
-}
-
-.tab-btn.active {
-    color: var(--cyan-neon);
-    background: rgba(0, 242, 254, 0.08);
-    border: 1px solid rgba(0, 242, 254, 0.15);
-}
-
-/* Status Badge */
-.connection-status {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    font-weight: 700;
-    padding: 5px 12px;
-    border-radius: 20px;
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.02);
-}
-
-.status-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background-color: var(--red-neon);
-    box-shadow: 0 0 8px var(--red-neon);
-    transition: background-color var(--transition-speed), box-shadow var(--transition-speed);
-}
-
-.status-dot.connected {
-    background-color: var(--green-neon);
-    box-shadow: 0 0 8px var(--green-neon);
-}
-
-/* Main Grid Layout */
-.dashboard-grid {
-    display: grid;
-    grid-template-columns: 320px 1fr 345px;
-    gap: 16px;
-    flex: 1;
-    padding: 16px;
-    overflow: hidden;
-    height: calc(100vh - 95px);
-}
-
-/* Sidebar Column Layout */
-.col-left, .col-right {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    height: 100%;
-    overflow: hidden;
-}
-
-.col-center {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    height: 100%;
-    overflow: hidden;
-}
-
-/* Card styling */
-.widget-card {
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-}
-
-@media (hover: hover) and (pointer: fine) {
-    .widget-card:hover {
-        border-color: var(--border-hover);
-        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55), 0 0 15px rgba(0, 242, 254, 0.03);
-    }
-}
-
-.widget-header {
-    padding: 12px 16px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background: rgba(0, 0, 0, 0.1);
-}
-
-.widget-header h2 {
-    font-family: 'Sora', sans-serif;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
-    color: var(--text-primary);
-}
-
-.widget-body {
-    flex: 1;
-    overflow-y: auto;
-    padding: 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-/* Heights */
-.w-analytics {
-    flex: 0 0 auto;
-}
-.w-vehicles {
-    flex: 1;
-}
-.w-map {
-    flex: 1;
-    position: relative;
-}
-.w-logs {
-    flex: 0 0 240px;
-}
-.w-simulator {
-    flex: 0 0 auto;
-}
-.w-emergency {
-    flex: 0 0 auto;
-}
-.w-violations {
-    flex: 1;
-}
-
-/* Map frame */
-.map-container {
-    width: 100%;
-    height: 100%;
-    border-radius: 8px;
-    overflow: hidden;
-    position: relative;
-    border: 1px solid rgba(255, 255, 255, 0.02);
-}
-
-#map {
-    width: 100%;
-    height: 100%;
-}
-
-/* ---------------------------------------------------------------------------
-   Focus modes
-
-   Focusing a tab removes the irrelevant widgets from layout and collapses the
-   column that held them, so the remaining panels actually gain the space. The
-   previous approach dimmed and blurred them while leaving their grid tracks at
-   full width, which meant "focus" never made the map or the focused panel any
-   larger.
-   --------------------------------------------------------------------------- */
-
-/* Live Traffic: keep the fleet sidebar and the map, drop the right column. */
-.dashboard-grid.focus-map {
-    grid-template-columns: 320px 1fr;
-}
-.dashboard-grid.focus-map .col-right {
-    display: none;
-}
-
-/* The three right-hand modes drop the analytics sidebar and widen the panel. */
-.dashboard-grid.focus-emergency,
-.dashboard-grid.focus-violations,
-.dashboard-grid.focus-simulator {
-    grid-template-columns: 1fr 400px;
-}
-.dashboard-grid.focus-emergency .col-left,
-.dashboard-grid.focus-violations .col-left,
-.dashboard-grid.focus-simulator .col-left {
-    display: none;
-}
-
-/* Within the right column, show only the focused widget and let it fill. */
-.dashboard-grid.focus-emergency .w-simulator,
-.dashboard-grid.focus-emergency .w-violations,
-.dashboard-grid.focus-violations .w-simulator,
-.dashboard-grid.focus-violations .w-emergency,
-.dashboard-grid.focus-simulator .w-emergency,
-.dashboard-grid.focus-simulator .w-violations {
-    display: none;
-}
-
-.dashboard-grid.focus-emergency .w-emergency,
-.dashboard-grid.focus-violations .w-violations,
-.dashboard-grid.focus-simulator .w-simulator {
-    flex: 1;
-}
-
-/* Dynamic Emergency Alert overlay banner (Slide-in) */
-.alert-overlay-banner {
-    position: absolute;
-    top: 16px;
-    left: 16px;
-    right: 16px;
-    z-index: 1000;
-    padding: 12px 16px;
-    border-radius: 8px;
-    background: rgba(255, 71, 87, 0.95);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid var(--red-neon);
-    box-shadow: 0 0 25px var(--red-glow);
-    display: none;
-    align-items: center;
-    gap: 12px;
-    animation: alertSlideIn 0.35s var(--ease-out), alertPulse 2s infinite ease-in-out;
-}
-
-@keyframes alertSlideIn {
-    from { transform: translateY(-15px); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
-}
-
-@keyframes alertPulse {
-    0%, 100% { box-shadow: 0 0 15px var(--red-glow); }
-    50% { box-shadow: 0 0 25px rgba(255, 71, 87, 0.4); }
-}
-
-.alert-overlay-banner.show {
-    display: flex;
-}
-
-.alert-icon-pulse {
-    font-size: 20px;
-    animation: iconPulse 0.8s infinite alternate;
-}
-
-@keyframes iconPulse {
-    from { transform: scale(1); }
-    to { transform: scale(1.2); }
-}
-
-.alert-message-content {
-    flex: 1;
-}
-
-.alert-message-content h4 {
-    font-family: 'Sora', sans-serif;
-    font-size: 12px;
-    font-weight: 700;
-    margin-bottom: 2px;
-}
-
-.alert-message-content p {
-    font-size: 10.5px;
-    opacity: 0.9;
-}
-
-.alert-close-btn {
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    color: white;
-    padding: 3px 8px;
-    cursor: pointer;
-    border-radius: 4px;
-    font-size: 9.5px;
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-weight: 600;
-    transition: transform 0.12s var(--ease-out), background-color 0.2s;
-}
-
-.alert-close-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-}
-
-.alert-close-btn:active {
-    transform: scale(0.95);
-}
-
-/* Vehicle List Item styling */
-.list-container {
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.vehicle-card {
-    padding: 10px 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    cursor: pointer;
-    background: rgba(255, 255, 255, 0.01);
-    border: 1px solid rgba(255, 255, 255, 0.02);
-    border-radius: 6px;
-    transition: transform 0.15s var(--ease-out), 
-                border-color 0.15s var(--ease-out), 
-                background-color 0.15s var(--ease-out);
-}
-
-.vehicle-card.emergency {
-    border-left: 2px solid var(--red-neon);
-}
-
-.vehicle-card.normal {
-    border-left: 2px solid var(--green-neon);
-}
-
-@media (hover: hover) and (pointer: fine) {
-    .vehicle-card:hover {
-        transform: translateY(-1.5px);
-        background: rgba(255, 255, 255, 0.02);
-        border-color: rgba(255, 255, 255, 0.06);
-    }
-}
-
-.vehicle-card:active {
-    transform: scale(0.97);
-}
-
-.vehicle-card.active-selected {
-    background: rgba(0, 242, 254, 0.03);
-    border-color: rgba(0, 242, 254, 0.2);
-}
-
-.card-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.vehicle-title {
-    font-weight: 700;
-    font-size: 12px;
-    font-family: 'JetBrains Mono', monospace;
-}
-
-.vehicle-type-tag {
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 8.5px;
-    font-weight: 700;
-    padding: 1.5px 5px;
-    border-radius: 4px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.02);
-}
-
-.vehicle-type-tag.emergency-tag {
-    color: var(--red-neon);
-    background: rgba(255, 71, 87, 0.06);
-    border: 1px solid rgba(255, 71, 87, 0.15);
-}
-
-.card-details {
-    display: flex;
-    justify-content: space-between;
-    font-size: 10.5px;
-    color: var(--text-secondary);
-}
-
-.stat-value {
-    font-family: 'JetBrains Mono', monospace;
-    color: var(--text-primary);
-    font-weight: bold;
-}
-
-.stat-value.speeding {
-    color: var(--red-neon);
-    text-shadow: 0 0 5px var(--red-glow);
-}
-
-/* Logging System styling (Unified) */
-.logs-container {
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    height: 100%;
-}
-
-.log-item {
-    padding: 8px 10px;
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.005);
-    border: 1px solid rgba(255, 255, 255, 0.015);
-    border-left: 2px solid rgba(255, 255, 255, 0.06);
-    font-size: 11px;
-    line-height: 1.35;
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 10px;
-}
-
-.log-item.speed-violation {
-    border-left-color: var(--red-neon);
-    background: rgba(255, 71, 87, 0.015);
-}
-
-.log-item.emergency-alert {
-    border-left-color: var(--orange-neon);
-    background: rgba(255, 165, 2, 0.015);
-}
-
-.log-item.system-info {
-    border-left-color: var(--cyan-neon);
-    background: rgba(0, 242, 254, 0.015);
-}
-
-.log-time {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
-    color: var(--text-secondary);
-    white-space: nowrap;
-}
-
-.police-dispatch-badge {
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 8px;
-    font-weight: 700;
-    color: var(--cyan-neon);
-    border: 1px solid rgba(0, 242, 254, 0.15);
-    padding: 1px 4px;
-    border-radius: 3px;
-    background: rgba(0, 242, 254, 0.02);
-    margin-top: 3px;
-    display: inline-block;
-}
-
-/* Analytics Custom Gauges */
-.analytics-gauge {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-}
-
-.gauge-bar-bg {
-    width: 100%;
-    height: 6px;
-    background: rgba(0, 0, 0, 0.35);
-    border-radius: 3px;
-    overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.01);
-}
-
-.gauge-bar-fill {
-    height: 100%;
-    width: 0%;
-    transition: width 0.5s var(--ease-out);
-}
-
-#avg-speed-bar {
-    background: var(--cyan-neon);
-    box-shadow: 0 0 6px var(--cyan-glow);
-}
-
-#latency-bar {
-    background: var(--green-neon);
-    box-shadow: 0 0 6px var(--green-glow);
-}
-
-/* UI Action Buttons */
-.btn {
-    background: rgba(255, 255, 255, 0.025);
-    color: var(--text-primary);
-    border: 1px solid rgba(255, 255, 255, 0.04);
-    padding: 8px 12px;
-    border-radius: 6px;
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 10px;
-    font-weight: 700;
-    cursor: pointer;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    transition: transform 0.12s var(--ease-out), 
-                background-color 0.2s, 
-                border-color 0.2s, 
-                box-shadow 0.2s;
-}
-
-.btn:hover {
-    background: rgba(0, 242, 254, 0.06);
-    border-color: rgba(0, 242, 254, 0.2);
-}
-
-.btn:active {
-    transform: scale(0.96);
-}
-
-.btn.btn-active {
-    background: var(--cyan-neon);
-    color: #05060b;
-    border-color: var(--cyan-neon);
-    box-shadow: 0 0 10px var(--cyan-glow);
-}
-
-.btn.btn-active:hover {
-    background: #00d6e2;
-}
-
-/* Form input styling */
-.form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.form-group label {
-    font-size: 9px;
-    font-weight: 600;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.form-group input, .form-group select {
-    width: 100%;
-    background: rgba(0, 0, 0, 0.25);
-    border: 1px solid rgba(255, 255, 255, 0.04);
-    color: var(--text-primary);
-    padding: 6px 10px;
-    border-radius: 6px;
-    font-size: 11.5px;
-    outline: none;
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    transition: border-color var(--transition-speed);
-}
-
-.form-group input:focus, .form-group select:focus {
-    border-color: var(--cyan-neon);
-}
-
-/* Pre block formatting */
-pre {
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.03);
-    padding: 8px;
-    border-radius: 6px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 9.5px;
-    color: var(--cyan-neon);
-    overflow: auto;
-    white-space: pre-wrap;
-}
-
-/* Custom Scrollbar */
-::-webkit-scrollbar {
-    width: 4px;
-    height: 4px;
-}
-::-webkit-scrollbar-track {
-    background: rgba(0, 0, 0, 0.05);
-}
-::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.04);
-    border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.1);
-}
-
-/* ---------------------------------------------------------------------------
-   Mock / simulated feature labelling
-
-   Several panels in this dashboard display illustrative output rather than
-   results from a real subsystem. They carry these markers so an operator can
-   tell at a glance what is measured and what is staged.
-   --------------------------------------------------------------------------- */
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--canvas);
+  color: var(--ink);
+  height: 100vh;
+  overflow: hidden;
+}
+
+.muted { color: var(--muted); }
+.error { color: var(--danger); font-size: 13px; }
+
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: -0.2px; }
+.brand-mark {
+  width: 26px; height: 26px; border-radius: 8px;
+  background: var(--accent); color: var(--on-accent);
+  display: grid; place-items: center; font-size: 14px;
+}
+
+.gate { height: 100vh; display: grid; place-items: center; padding: 24px; }
+.gate-card {
+  width: min(400px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  padding: 28px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.gate-card h1 { font-size: 24px; letter-spacing: -0.6px; margin-top: 10px; }
+.label { font-size: 10px; font-weight: 700; letter-spacing: 1.1px; text-transform: uppercase; color: var(--muted); margin-top: 8px; }
+
+.field {
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 13px 14px;
+  color: var(--ink);
+  font-size: 15px;
+  font-family: inherit;
+}
+.field:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.pill {
+  border: none; border-radius: var(--r-pill);
+  padding: 14px 22px; font-size: 15px; font-weight: 700;
+  font-family: inherit; cursor: pointer; margin-top: 12px;
+}
+.pill.accent { background: var(--accent); color: var(--on-accent); }
+.pill:disabled { opacity: 0.5; cursor: default; }
+
+/* --- Shell: sidebar + map, matching the reference layout ------------------ */
+.shell {
+  height: 100vh;
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 12px;
+  padding: 12px;
+}
+
+.sidebar {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 18px;
+  display: flex; flex-direction: column; gap: 14px;
+  overflow: hidden;
+}
+
+.sidebar-head { display: flex; align-items: center; justify-content: space-between; }
+
+.icon-btn {
+  width: 34px; height: 34px; border-radius: var(--r-pill);
+  background: var(--surface-high); border: 1px solid var(--line);
+  color: var(--muted); cursor: pointer; font-size: 14px;
+}
+.icon-btn:hover { color: var(--ink); }
+
+.search { position: relative; }
+.search input {
+  width: 100%;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px 40px 12px 14px;
+  color: var(--ink); font-size: 14px; font-family: inherit;
+}
+.search input:focus { outline: 1px solid var(--accent); }
+.search-icon { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); color: var(--faint); }
+
+.filters { display: flex; gap: 18px; }
+.filter-group { display: flex; flex-direction: column; gap: 6px; }
+.filter-group small { font-size: 11px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.chip {
+  background: var(--surface-high);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 7px 11px;
+  color: var(--muted); font-size: 12px; font-weight: 600;
+  font-family: inherit; cursor: pointer;
+}
+.chip.active { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 
-.mock-badge {
-    display: inline-block;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 8px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--orange-neon);
-    background: var(--orange-glow);
-    border: 1px solid rgba(255, 165, 2, 0.35);
-    border-radius: 3px;
-    padding: 1px 4px;
-    margin-left: 6px;
-    vertical-align: middle;
-}
-
-.mock-note {
-    display: block;
-    font-size: 9.5px;
-    line-height: 1.4;
-    color: var(--text-muted);
-    font-style: italic;
-    margin-top: 4px;
-}
-
-/* The dispatch badge on a violation log entry is illustrative, not an action. */
-.police-dispatch-badge {
-    background: var(--orange-glow);
-    border: 1px solid rgba(255, 165, 2, 0.35);
-    color: var(--orange-neon);
-}
-
-/* ---------------------------------------------------------------------------
-   Responsive layout
-
-   The grid was previously a fixed 320px / 1fr / 345px at a locked
-   calc(100vh - 95px) with overflow hidden, and no layout breakpoints at all.
-   Below roughly 1100px the centre column collapsed, and on a short laptop
-   screen the widgets were clipped with no way to scroll to them.
-
-   Wide screens keep the locked-viewport control-room layout. Narrower ones
-   progressively hand height back to the document and let the page scroll.
-   --------------------------------------------------------------------------- */
-
-/* Large desktop: tighten the side columns before anything has to collapse. */
-@media (max-width: 1500px) {
-    .dashboard-grid {
-        grid-template-columns: 280px 1fr 310px;
-        gap: 12px;
-        padding: 12px;
-    }
-    .dashboard-grid.focus-map {
-        grid-template-columns: 280px 1fr;
-    }
-    .dashboard-grid.focus-emergency,
-    .dashboard-grid.focus-violations,
-    .dashboard-grid.focus-simulator {
-        grid-template-columns: 1fr 360px;
-    }
-}
-
-/* Short viewports: give the map its height back by shrinking the log feed. */
-@media (max-height: 860px) {
-    .w-logs {
-        flex: 0 0 180px;
-    }
-}
+.list-head { display: flex; align-items: center; justify-content: space-between; }
+.list-head strong { font-size: 14px; }
+.conn { display: flex; align-items: center; gap: 6px; }
 
-@media (max-height: 720px) {
-    .w-logs {
-        flex: 0 0 140px;
-    }
-    .widget-body {
-        padding: 10px;
-    }
-}
-
-/* Tablet / small laptop: two columns. The right-hand tools move under the map,
-   and the page becomes scrollable rather than clipped. */
-@media (max-width: 1200px) {
-    /* The wide layout pins the body to the viewport with overflow hidden. Once
-       the grid is allowed to grow past one screen, the document has to be able
-       to scroll or the extra rows are simply clipped. */
-    body {
-        height: auto;
-        min-height: 100vh;
-        overflow-y: auto;
-        overflow-x: hidden;
-    }
-
-    .dashboard-grid,
-    .dashboard-grid.focus-map,
-    .dashboard-grid.focus-emergency,
-    .dashboard-grid.focus-violations,
-    .dashboard-grid.focus-simulator {
-        grid-template-columns: 300px 1fr;
-        height: auto;
-        min-height: calc(100vh - 95px);
-        overflow: visible;
-    }
-
-    .col-left,
-    .col-center,
-    .col-right {
-        height: auto;
-        overflow: visible;
-    }
-
-    /* The tools column spans the full width beneath the map and sidebar. */
-    .col-right {
-        grid-column: 1 / -1;
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-        align-items: start;
-    }
-
-    /* A map with no fixed parent height needs an explicit one. */
-    .w-map {
-        min-height: 60vh;
-    }
-    .w-vehicles {
-        min-height: 280px;
-    }
-    .w-logs {
-        flex: 0 0 auto;
-        min-height: 200px;
-    }
-    .w-violations {
-        min-height: 320px;
-    }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); display: inline-block; }
+.dot.on { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
 
-    /* Focus modes still hide widgets, but no longer restyle the columns. */
-    .dashboard-grid.focus-map .col-right,
-    .dashboard-grid.focus-emergency .col-left,
-    .dashboard-grid.focus-violations .col-left,
-    .dashboard-grid.focus-simulator .col-left {
-        display: none;
-    }
-    .dashboard-grid.focus-emergency .col-center,
-    .dashboard-grid.focus-violations .col-center,
-    .dashboard-grid.focus-simulator .col-center {
-        grid-column: 1 / -1;
-    }
-}
-
-/* Phone / narrow window: single column, everything stacked. */
-@media (max-width: 820px) {
-    .dashboard-grid,
-    .dashboard-grid.focus-map,
-    .dashboard-grid.focus-emergency,
-    .dashboard-grid.focus-violations,
-    .dashboard-grid.focus-simulator {
-        grid-template-columns: 1fr;
-    }
-
-    .col-right {
-        grid-template-columns: 1fr;
-        gap: 12px;
-    }
-
-    .w-map {
-        min-height: 50vh;
-    }
-
-    header.glass-panel {
-        flex-wrap: wrap;
-        gap: 10px;
-    }
-
-    .nav-tabs {
-        order: 3;
-        width: 100%;
-        overflow-x: auto;
-        /* Keep the tab strip swipeable instead of letting it squash. */
-        flex-wrap: nowrap;
-        scrollbar-width: none;
-    }
-    .nav-tabs::-webkit-scrollbar {
-        display: none;
-    }
-    .tab-btn {
-        white-space: nowrap;
-    }
-}
+.list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; min-height: 80px; }
