@@ -1,44 +1,60 @@
 # SUTRA — Real-Time Vehicle Telemetry
 
-A three-part demo system: an Android client that streams live GPS telemetry, a
-Node relay that authenticates and fans it out, and a browser dashboard that
-renders the fleet on a map.
+A vehicle client that streams live GPS to Supabase, and an operator dashboard
+that renders the fleet on a map.
 
-| Component | What it is |
-| --- | --- |
-| `apk/` | Android vehicle client — Kotlin, Jetpack Compose, foreground location service |
-| `backend-mock/` | Node relay — REST login, session tokens, WebSocket fan-out (in-memory only) |
-| `admin-dashboard/` | Operator dashboard — vanilla JS, Google Maps |
+| Component | What it is | Status |
+| --- | --- | --- |
+| `mobile/` | Expo (React Native) vehicle client | current |
+| `supabase/` | Postgres schema, RLS policies, Directions Edge Function | current |
+| `admin-dashboard/` | Operator dashboard, vanilla JS + Google Maps | **not yet migrated** |
+| `backend-mock/` | Node WebSocket relay | superseded, kept for the dashboard |
+| `apk/` | Original Kotlin/Compose client | superseded, kept for reference |
+
+> **The operator dashboard is currently blind.** It still subscribes to the Node
+> relay, which no longer receives telemetry now that the app writes to Supabase.
+> Migrating it to Supabase Realtime is the next piece of work.
 
 ---
 
 ## What is real, and what is staged
 
-This is a prototype. The telemetry pipeline is genuine; several presentation
-features are illustrative placeholders. They are labelled `MOCK` in the UI and
-in code comments so nothing here is mistaken for a working subsystem.
+The telemetry pipeline is genuine. Some presentation features in the operator
+dashboard are illustrative placeholders and are labelled `MOCK` in the UI.
 
-**Real:**
+**Real:** GPS acquisition and background streaming, authentication with
+row-level security, server-enforced emergency authorization, Google Directions
+routing, speed-limit violation logging.
 
-* GPS acquisition via `FusedLocationProviderClient`, with different accuracy and
-  update rates for emergency and normal vehicles.
-* WebSocket streaming with exponential-backoff reconnection.
-* Server-side authentication, session-bound identity, and telemetry validation.
-* Google Directions routing in the Android client, including polyline decoding.
-* Local telemetry history in SQLite, with replay.
-* Speed-limit violation counting and logging (local to the dashboard).
+**Mocked (operator dashboard only):** the bypass overlay, the latency gauge, the
+police dispatch payload, the green-corridor signal override, and the
+single-vehicle speed threshold labelled as congestion detection. See the
+dashboard UI for the specifics; each carries a badge.
 
-**Mocked — no real subsystem behind these:**
+---
 
-| Feature | What it actually does |
-| --- | --- |
-| "Nearest emergency services" | Fixed lat/lng offsets from the vehicle. The markers follow the vehicle around. Not a facility lookup. |
-| Bypass overlay ("Optimize Global Flow") | Draws a line offset ~200 m from the route midpoint. No routing engine, no traffic data, nothing is rerouted. |
-| Police dispatch payload | A JSON block generated in the browser with a random ticket number and officer name. No request is sent anywhere. |
-| Green corridor / signal override | Displays the broadcast message. No traffic signal controller is contacted. |
-| Connection performance gauge | A placeholder driven by vehicle count. No latency is measured. |
-| Congestion detection | A single-vehicle speed threshold (`0 < speed < 15 km/h`). One car at a red light triggers it. |
-| Dashboard route line | A straight line to the destination, not road geometry. |
+## Security model
+
+Emergency privilege is a database column an administrator sets. It is **not**
+something a driver can claim.
+
+- `vehicles.is_emergency_authorized` is protected by a `BEFORE UPDATE` trigger,
+  because Postgres has no column-level RLS on `UPDATE`. A driver attempting to
+  set it gets `P0001`.
+- `vehicle_positions` has **no emergency column at all**. Status is derived by
+  joining to `vehicles`, so a modified client has nothing to forge.
+- Range checks on latitude, longitude, speed and heading are database
+  constraints, not application code, so they cannot be bypassed.
+- The Google Directions key lives in an Edge Function's environment and never
+  ships in the APK.
+
+To authorize a vehicle, run this in the Supabase SQL editor:
+
+```sql
+update public.vehicles
+   set is_emergency_authorized = true
+ where vehicle_number = 'KA-03-AB-1234';
+```
 
 ---
 
@@ -46,84 +62,90 @@ in code comments so nothing here is mistaken for a working subsystem.
 
 ### 1. Secrets
 
-No key is committed to this repository. Both components read local, gitignored
-config files:
+No key is committed. Copy the examples and fill them in:
 
 ```bash
-cp backend-mock/.env.example backend-mock/.env
-cp apk/.env.example apk/.env
+cp mobile/.env.example        mobile/.env
+cp supabase/.env.example      supabase/.env       # documents the function secret
 cp admin-dashboard/config.example.js admin-dashboard/config.js
 ```
 
-Fill in each one. `EMERGENCY_CODES` in `backend-mock/.env` are the codes that
-grant a client emergency-vehicle privileges; `OPERATOR_KEY` must match the value
-in `admin-dashboard/config.js`.
-
 > **Google Maps keys are not secret.** A browser key is visible to anyone who
-> loads the page, and an Android key ships inside the APK. Protection comes from
-> restriction, not concealment — in Google Cloud Console, restrict the browser
-> key by HTTP referrer and the Android key by package name and signing SHA-1,
-> and limit each to only the APIs it needs.
+> loads the page; an Android key ships inside the APK. Protection comes from
+> restriction — restrict the browser key by HTTP referrer and the Android key by
+> package name (`com.sutra.vehicle`) and signing SHA-1.
 
-### 2. Backend
+### 2. Database
 
 ```bash
-cd backend-mock
+npx supabase link --project-ref <your-project-ref>
+npx supabase db push
+npx supabase functions deploy directions
+npx supabase secrets set GOOGLE_DIRECTIONS_KEY=<key>
+```
+
+`link` prompts for the database password. It is not stored in the repo.
+
+### 3. Mobile app
+
+```bash
+cd mobile
 npm install
-npm start
+npm run prebuild          # expo prebuild + Gradle memory tuning
+cd android && ./gradlew assembleDebug
 ```
 
-Listens on `:3000` and prints a live table of connected vehicles.
+The APK lands at `mobile/android/app/build/outputs/apk/debug/app-debug.apk`.
 
-### 3. Dashboard
-
-Serve `admin-dashboard/` over HTTP (`file://` will not work — the Maps library
-and the referrer restriction both need an origin):
+If Gradle cannot find a JDK, point at the one bundled with Android Studio:
 
 ```bash
-cd admin-dashboard
-python -m http.server 8080
+export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
 ```
 
-Open `http://localhost:8080`.
+Set `GOOGLE_MAPS_ANDROID_KEY` in the environment before `prebuild` to embed the
+Maps key. Without it the app builds and runs, but map tiles render grey.
 
-### 4. Android client
+### 4. Operator dashboard (legacy path)
 
-Open the `apk/` folder in Android Studio, let Gradle sync, then
-**Build > Build Bundle(s) / APK(s) > Build APK(s)**.
-
-Set `BACKEND_HOST` in `apk/.env` to reach your backend: `10.0.2.2:3000` from the
-emulator, or your machine's LAN IP from a physical device.
+```bash
+cd backend-mock && npm install && npm start
+cd admin-dashboard && python -m http.server 8080
+```
 
 ---
 
-## Authentication
+## Testing
 
-Every streaming client is authenticated. There is no anonymous path into the
-telemetry stream.
+```bash
+cd mobile          && npm test && npm run typecheck   # 45 tests
+cd supabase/tests  && npm install && npm test         # 30 tests
+```
 
-1. The client `POST`s to `/api/auth/login` with its driver name, vehicle ID and
-   type. Requesting an emergency type requires a valid `emergencyCode`; without
-   one the login is rejected with `403` rather than silently downgraded.
-2. The server issues an opaque session token and records the vehicle's identity
-   and privileges against it.
-3. The client opens `ws://…/vehicle/stream?token=<token>`. An invalid or expired
-   token is refused at the HTTP upgrade.
-4. **Every identity field the dashboard displays comes from the session, not
-   from the streamed frame.** A client cannot claim another vehicle's ID, rename
-   its driver, or upgrade itself to emergency status by editing its own JSON.
+Schema and RLS tests run against **PGlite** — Postgres compiled to WASM, in
+process — so no Docker daemon or hosted database is needed. The `auth` schema is
+a stub matching Supabase's shape, so these verify policy logic rather than
+Supabase's own runtime; `db push` against the hosted project is where that gets
+confirmed.
 
-Dashboards use a separate endpoint, `ws://…/dashboard/stream?key=<operator key>`,
-and are subscribers only. Anything a dashboard sends is ignored.
+The test runner is pinned to `--test-concurrency=1`: each test boots its own
+WASM Postgres, and running files in parallel exhausts memory.
 
-### Known limitations
+---
 
-* Sessions are held in memory and are lost when the server restarts.
-* Transport is cleartext `http://` and `ws://`, and the Android manifest sets
-  `usesCleartextTraffic="true"`. This is a LAN demo, not a deployable posture —
-  real use needs TLS.
-* There is no rate limiting on login, and emergency codes are shared secrets
-  rather than per-driver credentials.
+## Design
+
+The app is dark-only with a single acid-lime accent. The accent marks the live
+thing — the route on the map, the active nav item, the primary action — and
+nothing decorative uses it.
+
+Icon, adaptive icon layers, splash mark and favicon are generated from code:
+
+```bash
+cd mobile && npm run generate-assets
+```
+
+Editing `scripts/generate-assets.mjs` regenerates all six.
 
 ---
 
@@ -131,29 +153,29 @@ and are subscribers only. Anything a dashboard sends is ignored.
 
 ```mermaid
 sequenceDiagram
-    participant App as Android Client
-    participant Server as Node Relay
+    participant App as Expo Client
+    participant SB as Supabase
     participant Dash as Operator Dashboard
 
-    App->>Server: POST /api/auth/login (name, vehicleId, type, emergencyCode?)
-    Server-->>App: { success, token, isEmergency }
-    Note over Server: Emergency status granted by the server, or not at all
-    Dash->>Server: WS /dashboard/stream?key=<operator key>
-    App->>Server: WS /vehicle/stream?token=<token>
+    App->>SB: signInWithPassword
+    SB-->>App: session
+    App->>SB: select vehicles (RLS: own only)
+    Note over App: expo-location background task starts
     loop Every 1s (emergency) / 3s (normal)
-        App->>Server: { lat, lng, speed, direction, ... }
-        Note over Server: Validate; overwrite identity from session
-        Server->>Dash: { type: "UPDATE", data }
+        App->>SB: upsert vehicle_positions
+        Note over SB: constraints validate; RLS checks ownership
     end
-    App->>Server: close
-    Server->>Dash: { type: "DISCONNECT", vehicleId }
+    SB-->>Dash: Realtime postgres_changes (once migrated)
 ```
 
 ---
 
-## Repository layout note
+## Known limitations
 
-`node_modules/` and Android `build/` output are ignored and must stay untracked.
-They were committed early in this project's history; the working tree no longer
-tracks them, but they remain in past commits, which is why the repository is
-larger than its source.
+- Transport for the legacy dashboard is cleartext `ws://`; the Expo client uses
+  HTTPS to Supabase.
+- Sessions in the retired Node relay were in-memory. Supabase sessions persist.
+- There is no rate limiting on sign-in beyond Supabase's own defaults.
+- `node_modules/` and Android `build/` output are ignored and must stay
+  untracked. They were committed early in this project's history, which is why
+  the repository is larger than its source.
