@@ -281,3 +281,9 @@ textarea.field-sm { resize: vertical; min-height: 76px; }
   padding: 6px; text-decoration: underline; text-underline-offset: 3px;
 }
 .link-btn:hover { color: var(--ink); }
+
+.map-fallback {
+  height: 100%; display: flex; flex-direction: column; gap: 8px;
+  align-items: center; justify-content: center; text-align: center;
+  padding: 24px; color: var(--ink); font-size: 13px;
+}

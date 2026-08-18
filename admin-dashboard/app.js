@@ -103,13 +103,20 @@ $('gate-form').addEventListener('submit', async (event) => {
     return;
   }
 
-  const { error } = await supabase.auth.signInWithPassword(credentials);
-
-  if (error) gateError(error.message);
-  else await enterConsole();
-
-  button.disabled = false;
-  button.textContent = 'Sign in';
+  try {
+    const { error } = await supabase.auth.signInWithPassword(credentials);
+    if (error) gateError(error.message);
+    else await enterConsole();
+  } catch (e) {
+    // Anything thrown past this point used to hang the button on "Signing in".
+    console.error('[sutra] sign-in failed', e);
+    gateError(`Signed in, but the console failed to start: ${e?.message ?? e}`);
+    $('gate').hidden = false;
+    $('console').hidden = true;
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Sign in';
+  }
 });
 
 /** Both paths need the same check, so it lives in one place. */
@@ -213,6 +220,9 @@ $('sign-out').addEventListener('click', async () => {
 // ---------------------------------------------------------------------------
 
 function initMap() {
+  if (!maplibregl?.Map) {
+    throw new Error('Map library failed to load. Check the network tab for esm.sh.');
+  }
   state.map = new maplibregl.Map({
     container: 'map',
     style: MAP_STYLE,
@@ -231,6 +241,7 @@ function markerElement(entry) {
 }
 
 function refreshMarker(entry) {
+  if (!state.map) return;
   const lngLat = [entry.position.lng, entry.position.lat];
   if (!entry.marker) {
     entry.marker = new maplibregl.Marker({ element: markerElement(entry) })
@@ -256,7 +267,7 @@ function refreshMarker(entry) {
 function selectVehicle(vehicleId) {
   state.selectedId = vehicleId;
   const entry = state.fleet.get(vehicleId);
-  if (entry) {
+  if (entry && state.map) {
     state.map.easeTo({ center: [entry.position.lng, entry.position.lat], zoom: 15, duration: 600 });
   }
   state.fleet.forEach(refreshMarker);
@@ -266,7 +277,7 @@ function selectVehicle(vehicleId) {
 
 $('fit-all').addEventListener('click', () => {
   const entries = [...state.fleet.values()];
-  if (entries.length === 0) return;
+  if (entries.length === 0 || !state.map) return;
   const first = [entries[0].position.lng, entries[0].position.lat];
   const bounds = entries.reduce(
     (b, e) => b.extend([e.position.lng, e.position.lat]),
@@ -278,6 +289,7 @@ $('fit-all').addEventListener('click', () => {
 /** Draw a vehicle's recent track. Reuses one source id so switching vehicles
  *  replaces the trail rather than stacking layers. */
 function drawTrack(points) {
+  if (!state.map) return;
   const SRC = 'track';
   const coords = points.map((p) => [p.lng, p.lat]);
 
@@ -795,7 +807,7 @@ function applyPosition(position) {
   refreshMarker(entry);
 
   if (state.selectedId === position.vehicle_id) {
-    state.map.easeTo({ center: [position.lng, position.lat], duration: 400 });
+    state.map?.easeTo({ center: [position.lng, position.lat], duration: 400 });
     renderDetail();
   }
 
@@ -818,7 +830,25 @@ async function loadViolationCount() {
 }
 
 async function startConsole() {
-  initMap();
+  // The map is the most fragile part of the console: MapLibre needs WebGL, and
+  // throws if the browser or GPU cannot provide it. Losing the map should not
+  // cost the operator the fleet list, events and alerts, so this is contained.
+  try {
+    initMap();
+  } catch (e) {
+    console.error('[sutra] map unavailable', e);
+    const container = $('map');
+    clear(container);
+    container.appendChild(
+      el('div', { className: 'map-fallback' }, [
+        el('strong', { text: 'Map unavailable' }),
+        el('span', {
+          className: 'muted',
+          text: `${e?.message ?? e}. The fleet list and events below still work.`,
+        }),
+      ]),
+    );
+  }
 
   // Backfill so a console opened mid-shift is not blank until the next frame.
   const { data, error } = await supabase.from('vehicle_positions').select('*');
@@ -878,5 +908,12 @@ async function startConsole() {
 
 // Resume an existing session so a refresh does not force another sign-in.
 supabase.auth.getSession().then(({ data }) => {
-  if (data.session) enterConsole();
+  if (data.session) {
+    enterConsole().catch((e) => {
+      console.error('[sutra] console failed to start', e);
+      $('gate').hidden = false;
+      $('console').hidden = true;
+      gateError(`Console failed to start: ${e?.message ?? e}`);
+    });
+  }
 });
