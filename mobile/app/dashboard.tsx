@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import * as Location from 'expo-location';
 import { Camera, GeoJSONSource, Layer, Map, Marker, UserLocation } from '@maplibre/maplibre-react-native';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { StatusBar } from 'expo-status-bar';
@@ -7,6 +16,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { listMyVehicles, Vehicle } from '../src/vehicles';
 import { setAlertMessage, setDestination, startTelemetry, stopTelemetry } from '../src/telemetry';
 import { fetchRoute } from '../src/directions';
+import { describePoint, Place, searchPlaces } from '../src/places';
 import {
   acknowledgeAlert,
   Alert as FleetAlert,
@@ -48,6 +58,14 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [pane, setPane] = useState('route');
   const [alerts, setAlerts] = useState<FleetAlert[]>([]);
+
+  // The driver's own position. Routing starts from here rather than from a
+  // hardcoded city centre, which was giving routes from the wrong place.
+  const [here, setHere] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [follow, setFollow] = useState(true);
+  const [query, setQuery] = useState('');
+  const [places, setPlaces] = useState<Place[]>([]);
+  const [searching, setSearching] = useState(false);
 
   const sheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['30%', '82%'], []);
@@ -96,8 +114,27 @@ export default function Dashboard() {
       }
     })();
 
+    // The map used to sit on a fixed city centre. Watching position lets it
+    // follow the driver and gives routing a real origin.
+    let positionWatch: Location.LocationSubscription | null = null;
+    Location.watchPositionAsync(
+      { accuracy: Location.Accuracy.Balanced, timeInterval: 4000, distanceInterval: 10 },
+      (loc) => {
+        if (active) {
+          setHere({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+        }
+      },
+    )
+      .then((sub) => {
+        positionWatch = sub;
+        // The screen may have unmounted while the subscription was being set up.
+        if (!active) sub.remove();
+      })
+      .catch(() => {});
+
     return () => {
       active = false;
+      positionWatch?.remove();
       unsubscribeAlerts?.();
       // The foreground service must not outlive the screen that started it.
       stopTelemetry();
@@ -115,7 +152,7 @@ export default function Dashboard() {
       setDestName(target.name);
 
       try {
-        setRoute(await fetchRoute(BANGALORE, target));
+        setRoute(await fetchRoute(here ?? BANGALORE, target));
       } catch (e) {
         setRoute([]);
         setError((e as Error).message);
@@ -123,8 +160,21 @@ export default function Dashboard() {
         setRouting(false);
       }
     },
-    [],
+    [here],
   );
+
+  async function runSearch() {
+    setError(null);
+    setSearching(true);
+    try {
+      setPlaces(await searchPlaces(query, here ?? undefined));
+    } catch (e) {
+      setPlaces([]);
+      setError((e as Error).message);
+    } finally {
+      setSearching(false);
+    }
+  }
 
   function applyTypedDestination() {
     const latitude = Number(destLat);
@@ -175,8 +225,34 @@ export default function Dashboard() {
     <View style={styles.screen}>
       <StatusBar style="light" />
 
-      <Map style={StyleSheet.absoluteFill} mapStyle={MAP_STYLE_URL} attribution logo={false}>
-        <Camera zoom={13} center={[BANGALORE.longitude, BANGALORE.latitude]} />
+      <Map
+        style={StyleSheet.absoluteFill}
+        mapStyle={MAP_STYLE_URL}
+        attribution
+        logo={false}
+        // Long-press anywhere to set that point as the destination.
+        onLongPress={(event: any) => {
+          const coords = event?.geometry?.coordinates;
+          if (!Array.isArray(coords) || coords.length < 2) return;
+          const [longitude, latitude] = coords;
+          setFollow(false);
+          describePoint(latitude, longitude).then((name) =>
+            applyDestination({ latitude, longitude, name }),
+          );
+        }}
+        // Any pan hands control back to the driver, as on the phone map apps.
+        onRegionIsChanging={(e: any) => {
+          if (e?.properties?.isUserInteraction) setFollow(false);
+        }}
+      >
+        <Camera
+          zoom={15}
+          center={
+            follow && here
+              ? [here.longitude, here.latitude]
+              : [BANGALORE.longitude, BANGALORE.latitude]
+          }
+        />
         <UserLocation />
 
         {/* The route is the only saturated thing on the map, by design.
@@ -248,6 +324,9 @@ export default function Dashboard() {
             </Text>
           </View>
         </View>
+        {!follow && here ? (
+          <AccentAction glyph="◎" label="Recentre on my location" onPress={() => setFollow(true)} />
+        ) : null}
         <AccentAction
           glyph="⏻"
           label="Stop streaming and choose another vehicle"
@@ -290,6 +369,42 @@ export default function Dashboard() {
 
           {pane === 'route' ? (
             <View style={styles.pane}>
+              <Label>Search a place</Label>
+              <View style={styles.row}>
+                <Field
+                  style={styles.flex}
+                  placeholder="Hospital, street, landmark…"
+                  value={query}
+                  onChangeText={setQuery}
+                  returnKeyType="search"
+                  onSubmitEditing={runSearch}
+                />
+                <PillButton
+                  label={searching ? '…' : 'Find'}
+                  busy={searching}
+                  onPress={runSearch}
+                />
+              </View>
+
+              {places.map((place) => (
+                <Pressable
+                  key={`${place.latitude},${place.longitude}`}
+                  style={styles.result}
+                  onPress={() => {
+                    setPlaces([]);
+                    setQuery('');
+                    setFollow(false);
+                    applyDestination(place);
+                  }}
+                >
+                  <Text style={styles.resultName} numberOfLines={2}>
+                    {place.name}
+                  </Text>
+                </Pressable>
+              ))}
+
+              <Text style={type.muted}>Or long-press anywhere on the map to set a destination.</Text>
+
               <Label>Frequent destinations</Label>
               <View style={styles.chipRow}>
                 {PRESETS.map((p) => (
@@ -302,6 +417,7 @@ export default function Dashboard() {
                   />
                 ))}
               </View>
+
               {routing ? <Text style={type.muted}>Finding a route…</Text> : null}
               {hasDestination ? (
                 <PillButton label="Clear route" variant="surface" onPress={clearRoute} />
@@ -444,6 +560,14 @@ const styles = StyleSheet.create({
   sheetTitle: { ...type.title, fontSize: 21, marginTop: space.sm },
 
   pane: { gap: space.md },
+  result: {
+    backgroundColor: color.surfaceHigh,
+    borderRadius: radius.chip,
+    borderWidth: 1,
+    borderColor: color.line,
+    padding: space.md,
+  },
+  resultName: { color: color.ink, fontSize: 13 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   row: { flexDirection: 'row', gap: space.sm },
   locked: { gap: space.sm, backgroundColor: color.surfaceHigh },

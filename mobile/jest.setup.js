@@ -23,6 +23,10 @@ jest.mock('expo-location', () => ({
   startLocationUpdatesAsync: jest.fn(),
   stopLocationUpdatesAsync: jest.fn(),
   hasStartedLocationUpdatesAsync: jest.fn(),
+  // The dashboard watches position to follow the driver; without this the
+  // screen awaits a promise that never settles and the test hangs.
+  watchPositionAsync: jest.fn().mockResolvedValue({ remove: jest.fn() }),
+  getCurrentPositionAsync: jest.fn(),
 }));
 
 jest.mock('expo-task-manager', () => ({

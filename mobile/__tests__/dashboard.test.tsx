@@ -53,9 +53,14 @@ jest.mock('../src/telemetry', () => ({
   setAlertMessage: (...a: unknown[]) => mockSetAlertMessage(...a),
 }));
 
-// Pulls in the real Supabase client otherwise.
+// Pull in the real Supabase client otherwise.
 jest.mock('../src/directions', () => ({
   fetchRoute: (...a: unknown[]) => mockFetchRoute(...a),
+}));
+
+jest.mock('../src/places', () => ({
+  searchPlaces: jest.fn().mockResolvedValue([]),
+  describePoint: jest.fn().mockResolvedValue('Pinned point'),
 }));
 
 import Dashboard from '../app/dashboard';

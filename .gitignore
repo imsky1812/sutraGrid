@@ -31,3 +31,6 @@ mobile/.env
 
 # Built APKs are artifacts, not source
 *.apk
+
+# Staged copy of the dashboard for EAS Hosting
+mobile/dashboard-dist/

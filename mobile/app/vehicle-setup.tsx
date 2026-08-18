@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
 import { listMyVehicles, registerVehicle, validateVehicleNumber, Vehicle } from '../src/vehicles';
@@ -130,8 +140,16 @@ export default function VehicleSetup() {
         )}
       />
 
-      <View style={styles.footer}>
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+      >
+        <ScrollView
+          style={styles.footerScroll}
+          contentContainerStyle={styles.footer}
+          keyboardShouldPersistTaps="handled"
+        >
+          {error ? <Text style={styles.error}>{error}</Text> : null}
 
         {adding ? (
           <Card style={styles.form}>
@@ -167,7 +185,8 @@ export default function VehicleSetup() {
         ) : (
           <PillButton label="Register a vehicle" glyph="＋" onPress={() => setAdding(true)} />
         )}
-      </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -216,7 +235,10 @@ const styles = StyleSheet.create({
     paddingTop: space.md,
   },
 
-  footer: { padding: space.xl, gap: space.md },
+  // Capped so the form can scroll clear of the keyboard without pushing the
+  // fleet list off screen.
+  footerScroll: { maxHeight: '62%' },
+  footer: { padding: space.xl, gap: space.md, paddingBottom: space.xxl },
   form: { gap: space.sm },
   hint: { ...type.muted, fontSize: 11.5 },
   error: { color: color.danger, fontSize: 13 },

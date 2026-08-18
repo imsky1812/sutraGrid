@@ -82,26 +82,34 @@ export function setAlertMessage(message: string | null): void {
 // inside a component would leave the task undefined when the OS relaunches the
 // app into the background.
 TaskManager.defineTask(TELEMETRY_TASK, async ({ data, error }: any) => {
-  if (error || !activeVehicleId) return;
+  // This runs in the background, outside any React error boundary. An
+  // unhandled rejection here takes the whole app down, which is what made the
+  // app die after running for a while, so nothing is allowed to escape.
+  try {
+    if (error || !activeVehicleId) return;
 
-  const locations: Location.LocationObject[] | undefined = data?.locations;
-  if (!locations?.length) return;
+    const locations: Location.LocationObject[] | undefined = data?.locations;
+    if (!locations?.length) return;
 
-  const row = buildPositionRow(
-    activeVehicleId,
-    locations[locations.length - 1],
-    activeDestination,
-    activeAlert,
-  );
+    const row = buildPositionRow(
+      activeVehicleId,
+      locations[locations.length - 1],
+      activeDestination,
+      activeAlert,
+    );
 
-  const { error: upsertError } = await supabase
-    .from('vehicle_positions')
-    .upsert(row, { onConflict: 'vehicle_id' });
+    const { error: upsertError } = await supabase
+      .from('vehicle_positions')
+      .upsert(row, { onConflict: 'vehicle_id' });
 
-  if (upsertError) {
-    // Dropping the frame is correct: the next one is a second or three away,
-    // and retrying would queue stale positions ahead of fresh ones.
-    console.warn('[telemetry] upsert failed:', upsertError.message);
+    if (upsertError) {
+      // Dropping the frame is correct: the next one is a second or three away,
+      // and retrying would queue stale positions ahead of fresh ones.
+      console.warn('[telemetry] upsert rejected:', upsertError.message);
+    }
+  } catch (e) {
+    // Losing connectivity, a refreshing token, a malformed frame: all survivable.
+    console.warn('[telemetry] frame dropped:', (e as Error)?.message ?? e);
   }
 });
 
@@ -117,6 +125,12 @@ export async function startTelemetry(vehicle: Vehicle): Promise<void> {
   }
 
   activeVehicleId = vehicle.id;
+
+  // Starting a task that is already registered throws on some devices, and
+  // navigating between screens can call this twice.
+  if (await TaskManager.isTaskRegisteredAsync(TELEMETRY_TASK)) {
+    await Location.stopLocationUpdatesAsync(TELEMETRY_TASK).catch(() => {});
+  }
 
   await Location.startLocationUpdatesAsync(TELEMETRY_TASK, {
     accuracy: vehicle.is_emergency_authorized
@@ -134,8 +148,13 @@ export async function startTelemetry(vehicle: Vehicle): Promise<void> {
 }
 
 export async function stopTelemetry(): Promise<void> {
-  const running = await TaskManager.isTaskRegisteredAsync(TELEMETRY_TASK);
-  if (running) await Location.stopLocationUpdatesAsync(TELEMETRY_TASK);
+  try {
+    const running = await TaskManager.isTaskRegisteredAsync(TELEMETRY_TASK);
+    if (running) await Location.stopLocationUpdatesAsync(TELEMETRY_TASK);
+  } catch (e) {
+    // Called from unmount cleanup, where throwing would be worse than failing.
+    console.warn('[telemetry] stop failed:', (e as Error)?.message ?? e);
+  }
 
   activeVehicleId = null;
   activeDestination = null;

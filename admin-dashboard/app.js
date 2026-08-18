@@ -34,6 +34,7 @@ const state = {
   selectedId: null,
   map: null,
   historyLayerIds: [],
+  hasFramedFleet: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -270,8 +271,10 @@ function refreshMarker(entry) {
 
   const badge = root.querySelector('.marker-badge');
   const speed = num(entry.position.speed);
-  badge.textContent = `${plate(entry)} · ${speed.toFixed(0)}`;
-  badge.classList.toggle('over', speed > state.speedLimit);
+  const stale = isStale(entry);
+  badge.textContent = stale ? `${plate(entry)} · offline` : `${plate(entry)} · ${speed.toFixed(0)} km/h`;
+  badge.classList.toggle('over', !stale && speed > state.speedLimit);
+  root.classList.toggle('stale', stale);
 
   const avatar = root.querySelector('.marker-avatar');
   if (avatar.textContent !== glyph(entry)) avatar.textContent = glyph(entry);
@@ -816,8 +819,14 @@ function applyPosition(position) {
   entry.position = position;
   state.fleet.set(position.vehicle_id, entry);
 
+  const isFirst = state.fleet.size === 1 && !state.hasFramedFleet;
   ensureVehicle(entry, position.vehicle_id);
   refreshMarker(entry);
+
+  if (isFirst && state.map) {
+    state.hasFramedFleet = true;
+    state.map.easeTo({ center: [position.lng, position.lat], zoom: 14, duration: 900 });
+  }
 
   if (state.selectedId === position.vehicle_id) {
     state.map?.easeTo({ center: [position.lng, position.lat], duration: 400 });
@@ -917,8 +926,9 @@ async function startConsole() {
   // re-rendered on a timer rather than waiting for an event that never arrives.
   setInterval(() => {
     renderFleet();
+    state.fleet.forEach(refreshMarker);
     if (state.selectedId) renderDetail();
-  }, 10_000);
+  }, 5_000);
 }
 
 // Resume an existing session so a refresh does not force another sign-in.

@@ -293,3 +293,11 @@ textarea.field-sm { resize: vertical; min-height: 76px; }
   align-items: center; justify-content: center; text-align: center;
   padding: 24px; color: var(--ink); font-size: 13px;
 }
+
+/* A vehicle that has stopped reporting should read as stopped on the map too,
+   not just in the list. */
+.marker.stale .marker-avatar { opacity: 0.45; border-color: var(--faint); }
+.marker.stale .marker-badge { color: var(--faint); }
+
+.row:active { transform: scale(0.99); }
+.card, .row, .chip, .btn, .tool-btn { transition: background-color 120ms ease, border-color 120ms ease; }
