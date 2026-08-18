@@ -8,6 +8,9 @@ import type { ExpoConfig } from 'expo/config';
 const config: ExpoConfig = {
   name: 'SUTRA Vehicle',
   slug: 'sutra-vehicle',
+  // EAS account that owns the project. Set here rather than passed as
+  // --account each time, since the login has access to more than one.
+  owner: 'imsky1812s-org',
   version: '1.0.0',
   orientation: 'portrait',
   icon: './assets/icon.png',
@@ -24,7 +27,10 @@ const config: ExpoConfig = {
   android: {
     package: 'com.sutra.vehicle',
     adaptiveIcon: {
-      backgroundColor: '#E6F4FE',
+      // Matches the generated background layer and the app canvas. The template
+      // default was a light blue, which fought the dark mark on launchers that
+      // ignore the background image.
+      backgroundColor: '#0D0F0B',
       foregroundImage: './assets/android-icon-foreground.png',
       backgroundImage: './assets/android-icon-background.png',
       monochromeImage: './assets/android-icon-monochrome.png',
@@ -49,6 +55,14 @@ const config: ExpoConfig = {
 
   web: {
     favicon: './assets/favicon.png',
+  },
+
+  // Written by hand because `eas init` cannot modify a dynamic config.
+  // Not a secret - it appears in the public project URL.
+  extra: {
+    eas: {
+      projectId: 'a6814d09-f918-4a62-98c8-ceba323a2e9a',
+    },
   },
 
   plugins: [
