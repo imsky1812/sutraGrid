@@ -16,6 +16,12 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* The hidden attribute is display:none only in the UA stylesheet, so any author
+   display rule beats it. .gate and .shell both set display:grid, which meant
+   gate.hidden = true did nothing: signing in rendered the console underneath a
+   full-height gate that never went away. */
+[hidden] { display: none !important; }
+
 body {
   font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: var(--canvas);

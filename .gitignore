@@ -28,3 +28,6 @@ mobile/.expo/
 mobile/android/
 mobile/ios/
 mobile/.env
+
+# Built APKs are artifacts, not source
+*.apk

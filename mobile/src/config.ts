@@ -3,22 +3,20 @@
  *
  * Expo inlines EXPO_PUBLIC_* values into the bundle at build time, so anything
  * here ends up readable inside the APK. That is expected for the Supabase anon
- * key, which is designed to be public and is constrained by row-level security.
- * Never put a service_role key or a Directions key here — the Directions key
- * lives in the Edge Function's environment instead.
+ * key, which is publishable and constrained by row-level security. Never put a
+ * service_role key here.
+ *
+ * This deliberately does not throw. Throwing at module load happens before React
+ * can render anything, so on a device it is an instant crash with no message and
+ * nothing to go on. Instead the missing names are collected and the app shows
+ * them on screen.
  */
 
-function required(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    // Fail loudly at startup. The alternative is a confusing 401 from Supabase
-    // much later, far from the actual cause.
-    throw new Error(`Missing ${name}. Copy mobile/.env.example to mobile/.env and fill it in.`);
-  }
-  return value;
-}
+const REQUIRED = ['EXPO_PUBLIC_SUPABASE_URL', 'EXPO_PUBLIC_SUPABASE_ANON_KEY'] as const;
+
+export const missingConfig: string[] = REQUIRED.filter((name) => !process.env[name]);
 
 export const config = {
-  supabaseUrl: required('EXPO_PUBLIC_SUPABASE_URL'),
-  supabaseAnonKey: required('EXPO_PUBLIC_SUPABASE_ANON_KEY'),
+  supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL ?? '',
+  supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '',
 };
