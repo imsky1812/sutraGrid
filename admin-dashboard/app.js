@@ -96,10 +96,14 @@ $('gate-form').addEventListener('submit', async (event) => {
   button.disabled = true;
   button.textContent = 'Signing in…';
 
-  const { error } = await supabase.auth.signInWithPassword({
-    email: $('email').value.trim(),
-    password: $('password').value,
-  });
+  const credentials = readCredentials();
+  if (!credentials) {
+    button.disabled = false;
+    button.textContent = 'Sign in';
+    return;
+  }
+
+  const { error } = await supabase.auth.signInWithPassword(credentials);
 
   if (error) gateError(error.message);
   else await enterConsole();
@@ -108,15 +112,52 @@ $('gate-form').addEventListener('submit', async (event) => {
   button.textContent = 'Sign in';
 });
 
+/** Both paths need the same check, so it lives in one place. */
+function readCredentials() {
+  const email = $('email').value.trim();
+  const password = $('password').value;
+
+  // Supabase reads signUp with empty fields as an anonymous sign-in, and
+  // reports "Anonymous sign-ins are disabled" - which says nothing about the
+  // actual problem, that the form is blank.
+  if (!email) {
+    gateError('Enter your email address.');
+    return null;
+  }
+  if (password.length < 6) {
+    gateError('Enter a password of at least 6 characters.');
+    return null;
+  }
+  return { email, password };
+}
+
 $('gate-signup').addEventListener('click', async () => {
   $('gate-error').hidden = true;
-  const { data, error } = await supabase.auth.signUp({
-    email: $('email').value.trim(),
-    password: $('password').value,
-  });
-  if (error) return gateError(error.message);
+  const credentials = readCredentials();
+  if (!credentials) return;
+
+  const button = $('gate-signup');
+  button.disabled = true;
+  button.textContent = 'Creating…';
+
+  const { data, error } = await supabase.auth.signUp(credentials);
+
+  button.disabled = false;
+  button.textContent = 'Create an account';
+
+  if (error) {
+    // Supabase deliberately blurs whether an address is already registered.
+    return gateError(
+      /already|registered/i.test(error.message)
+        ? 'That address already has an account. Use Sign in instead.'
+        : error.message,
+    );
+  }
+
   // With email confirmation on, signUp returns a user but no session.
-  if (!data.session) return gateError('Account created. Confirm your email, then sign in.');
+  if (!data.session) {
+    return gateError('Account created. Confirm the link we emailed you, then sign in.');
+  }
   await enterConsole();
 });
 
