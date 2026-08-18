@@ -28,6 +28,15 @@ org.gradle.parallel=false
 org.gradle.workers.max=2
 kotlin.compiler.execution.strategy=in-process
 kotlin.incremental=false
+
+# Build native code for one ABI instead of four. Reanimated and worklets compile
+# a large amount of C++, and doing it four times over exhausted memory even
+# though each architecture builds fine on its own.
+#
+# arm64-v8a covers essentially every physical Android phone in use. It does NOT
+# cover x86_64 emulators - add x86_64 to this list if you need to run on one,
+# at the cost of roughly double the native build time and memory.
+reactNativeArchitectures=arm64-v8a
 `;
 
 if (!existsSync(PROPS)) {
