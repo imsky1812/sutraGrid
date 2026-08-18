@@ -7,6 +7,13 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { listMyVehicles, Vehicle } from '../src/vehicles';
 import { setAlertMessage, setDestination, startTelemetry, stopTelemetry } from '../src/telemetry';
 import { fetchRoute } from '../src/directions';
+import {
+  acknowledgeAlert,
+  Alert as FleetAlert,
+  CATEGORY_GLYPH,
+  fetchActiveAlerts,
+  subscribeToAlerts,
+} from '../src/alerts';
 import { MAP_STYLE_URL, ROUTE_COLOR, ROUTE_WIDTH } from '../src/mapStyle';
 import { AccentAction, Badge, Card, Chip, Field, Label, NavBar, PillButton } from '../src/ui';
 import { color, radius, shadow, space, type } from '../src/theme';
@@ -40,12 +47,14 @@ export default function Dashboard() {
   const [routing, setRouting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pane, setPane] = useState('route');
+  const [alerts, setAlerts] = useState<FleetAlert[]>([]);
 
   const sheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['30%', '82%'], []);
 
   useEffect(() => {
     let active = true;
+    let unsubscribeAlerts: (() => void) | null = null;
 
     (async () => {
       try {
@@ -63,6 +72,21 @@ export default function Dashboard() {
 
         setVehicle(found);
         setLoading(false);
+
+        // Existing alerts first, so a driver opening mid-shift sees what is
+        // already in force rather than only what arrives next.
+        fetchActiveAlerts(found.id)
+          .then((current) => {
+            if (active) setAlerts(current);
+          })
+          .catch(() => {});
+
+        unsubscribeAlerts = subscribeToAlerts(found.id, (alert) => {
+          if (!active) return;
+          setAlerts((current) => [alert, ...current.filter((a) => a.id !== alert.id)]);
+          acknowledgeAlert(alert.id, found.id).catch(() => {});
+        });
+
         await startTelemetry(found);
       } catch (e) {
         if (active) {
@@ -74,6 +98,7 @@ export default function Dashboard() {
 
     return () => {
       active = false;
+      unsubscribeAlerts?.();
       // The foreground service must not outlive the screen that started it.
       stopTelemetry();
     };
@@ -183,6 +208,32 @@ export default function Dashboard() {
           </Marker>
         )}
       </Map>
+
+      {/* Alerts from traffic control. Newest first, most recent on top. */}
+      {alerts.length > 0 && (
+        <View style={styles.alertStack}>
+          {alerts.slice(0, 2).map((alert) => (
+            <View
+              key={alert.id}
+              style={[
+                styles.alertCard,
+                alert.severity === 'CRITICAL' && styles.alertCritical,
+              ]}
+            >
+              <Text style={styles.alertGlyph}>{CATEGORY_GLYPH[alert.category]}</Text>
+              <View style={styles.flex}>
+                <Text style={styles.alertCategory}>{alert.category}</Text>
+                <Text style={styles.alertText}>{alert.message}</Text>
+              </View>
+              <AccentAction
+                glyph="✕"
+                label="Dismiss alert"
+                onPress={() => setAlerts((current) => current.filter((a) => a.id !== alert.id))}
+              />
+            </View>
+          ))}
+        </View>
+      )}
 
       {/* Floating status bar, echoing the reference's top search pill. */}
       <View style={styles.topBar}>
@@ -352,6 +403,29 @@ const styles = StyleSheet.create({
     ...shadow.float,
   },
   liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: color.accent },
+
+  alertStack: {
+    position: 'absolute',
+    top: space.xxl + space.xxl + space.xl,
+    left: space.lg,
+    right: space.lg,
+    gap: space.sm,
+  },
+  alertCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    backgroundColor: color.surface,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: color.accent,
+    padding: space.md,
+    ...shadow.float,
+  },
+  alertCritical: { borderColor: color.danger },
+  alertGlyph: { fontSize: 20 },
+  alertCategory: { ...type.caption, color: color.accent },
+  alertText: { color: color.ink, fontSize: 13, marginTop: 2 },
   destinationPin: {
     width: 18,
     height: 18,
