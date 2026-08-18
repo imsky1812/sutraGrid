@@ -86,25 +86,60 @@ npx supabase secrets set GOOGLE_DIRECTIONS_KEY=<key>
 
 `link` prompts for the database password. It is not stored in the repo.
 
-### 3. Mobile app
+### 3. Mobile app — EAS Build (recommended)
+
+Builds in Expo's cloud. Prefer this: the native build compiles a large amount of
+React Native C++, which needs more RAM than a typical laptop has spare.
+
+One-time setup — the first two steps are interactive and prompt for credentials:
+
+```bash
+cd mobile
+npx eas login
+npx eas init                     # writes the project id into app.config.ts
+
+# Build-time env. android/ and .env are gitignored, so EAS cannot see them;
+# these have to live as EAS secrets.
+npx eas secret:create --name EXPO_PUBLIC_SUPABASE_URL      --value https://<ref>.supabase.co
+npx eas secret:create --name EXPO_PUBLIC_SUPABASE_ANON_KEY --value <anon key>
+npx eas secret:create --name GOOGLE_MAPS_ANDROID_KEY       --value <maps key>
+```
+
+Then, for an installable APK:
+
+```bash
+npm run build:apk                # eas build -p android --profile preview
+```
+
+EAS runs `prebuild` itself from `app.config.ts`, so no local Android SDK, JDK or
+NDK is involved. It returns a download link when the build finishes.
+
+### 3b. Local build (fallback)
+
+Works, but needs the Android SDK and enough free RAM:
 
 ```bash
 cd mobile
 npm install
-npm run prebuild          # expo prebuild + Gradle memory tuning
-cd android && ./gradlew assembleDebug
+npm run prebuild                 # expo prebuild + Gradle memory tuning
+npm run apk                      # gradlew assembleDebug, parallelism capped
 ```
 
 The APK lands at `mobile/android/app/build/outputs/apk/debug/app-debug.apk`.
 
-If Gradle cannot find a JDK, point at the one bundled with Android Studio:
+Two things this path needs that EAS does not:
 
-```bash
-export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
-```
+- **Memory.** Ninja spawns one clang per core to compile the RN C++ codegen. On
+  a machine with little free RAM this fails with `LLVM ERROR: out of memory`,
+  which surfaces as an opaque Gradle task failure. `npm run apk` caps this via
+  `CMAKE_BUILD_PARALLEL_LEVEL`; note that `org.gradle.workers.max` does *not*
+  reach ninja's parallelism.
+- **A physical device.** The local build is pinned to `arm64-v8a` to halve the
+  native work, so the APK will not install on an x86_64 emulator. Add `x86_64`
+  to `reactNativeArchitectures` in `scripts/tune-gradle.mjs` if you need one.
 
-Set `GOOGLE_MAPS_ANDROID_KEY` in the environment before `prebuild` to embed the
-Maps key. Without it the app builds and runs, but map tiles render grey.
+Set `GOOGLE_MAPS_ANDROID_KEY` before `prebuild` to embed the Maps key. Without
+it the app builds and runs, but map tiles render grey.
 
 ### 4. Operator dashboard (legacy path)
 

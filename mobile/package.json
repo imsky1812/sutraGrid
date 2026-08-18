@@ -30,6 +30,7 @@
     "@types/jest": "^30.0.0",
     "@types/node": "^26.2.0",
     "@types/react": "~19.2.2",
+    "eas-cli": "^22.0.0",
     "jest": "^29.7.0",
     "jest-environment-jsdom": "^29.7.0",
     "jest-expo": "^57.0.4",
@@ -45,7 +46,9 @@
     "typecheck": "tsc --noEmit",
     "prebuild": "expo prebuild --platform android --clean && node scripts/tune-gradle.mjs",
     "generate-assets": "node scripts/generate-assets.mjs",
-    "apk": "node scripts/build-apk.mjs"
+    "apk": "node scripts/build-apk.mjs",
+    "build:apk": "eas build --platform android --profile preview",
+    "build:dev": "eas build --platform android --profile development"
   },
   "private": true,
   "jest": {
