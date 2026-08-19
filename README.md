@@ -175,6 +175,17 @@ cd admin-dashboard && python -m http.server 8080
 
 Deploy with `cd mobile && npx eas deploy --export-dir dashboard-dist`.
 
+Supabase needs to know where auth emails may return to. In
+**Authentication → URL Configuration**, set the site URL to the deployed
+dashboard and list it under redirect URLs. The dashboard derives its own
+redirect from `window.location.origin`, so it follows wherever it is served -
+but Supabase will only honour an address on that list.
+
+Only the deployed URL is currently listed. A password reset started from a
+locally served copy therefore lands on the deployed dashboard rather than
+`localhost`. That still completes the reset; add `http://localhost:8080` to the
+list if you would rather it come back to the local copy.
+
 ### 4. Android app
 
 ```bash
@@ -256,8 +267,6 @@ Things that cost real time here and are worth knowing:
 
 - The mobile app has not been verified on a device by its author; it is
   validated by tests and as a build artifact.
-- Supabase redirect URLs still point at `localhost:8080`. Update them so
-  password reset returns to the hosted dashboard.
 - `position_history` grows at roughly 1,200–3,600 rows per vehicle-hour. The
   prune keeps 30 days.
 - Public OSRM and Nominatim endpoints carry no availability guarantee.
