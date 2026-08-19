@@ -66,6 +66,7 @@ export default function Dashboard() {
   const [query, setQuery] = useState('');
   const [places, setPlaces] = useState<Place[]>([]);
   const [searching, setSearching] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
 
   const sheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['30%', '82%'], []);
@@ -114,23 +115,44 @@ export default function Dashboard() {
       }
     })();
 
-    // The map used to sit on a fixed city centre. Watching position lets it
-    // follow the driver and gives routing a real origin.
+    // Permission has to be granted before any position call, and this used to
+    // run before startTelemetry requested it - so the watch was rejected and the
+    // rejection swallowed, leaving the map stuck on the fallback city forever.
     let positionWatch: Location.LocationSubscription | null = null;
-    Location.watchPositionAsync(
-      { accuracy: Location.Accuracy.Balanced, timeInterval: 4000, distanceInterval: 10 },
-      (loc) => {
-        if (active) {
-          setHere({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+
+    (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          if (active) setLocationError('Location permission denied, so the map cannot follow you.');
+          return;
         }
-      },
-    )
-      .then((sub) => {
+        if (!active) return;
+
+        // One immediate fix, because watchPositionAsync only reports on the
+        // next update and the map would otherwise sit on the fallback until the
+        // driver moved.
+        const first = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        if (!active) return;
+        setHere({ latitude: first.coords.latitude, longitude: first.coords.longitude });
+
+        const sub = await Location.watchPositionAsync(
+          { accuracy: Location.Accuracy.Balanced, timeInterval: 4000, distanceInterval: 10 },
+          (loc) => {
+            if (active) {
+              setHere({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+            }
+          },
+        );
         positionWatch = sub;
-        // The screen may have unmounted while the subscription was being set up.
         if (!active) sub.remove();
-      })
-      .catch(() => {});
+      } catch (e) {
+        // Reported rather than swallowed: silence here is what hid the bug.
+        if (active) setLocationError((e as Error)?.message ?? 'Could not read your location.');
+      }
+    })();
 
     return () => {
       active = false;
@@ -240,20 +262,25 @@ export default function Dashboard() {
             applyDestination({ latitude, longitude, name }),
           );
         }}
-        // Any pan hands control back to the driver, as on the phone map apps.
-        onRegionIsChanging={(e: any) => {
-          if (e?.properties?.isUserInteraction) setFollow(false);
-        }}
       >
+        {/* trackUserLocation is handled natively, which keeps the camera on the
+            driver without this component re-centring it on every state change.
+            The native side also reports when a pan breaks the tracking. */}
         <Camera
+          trackUserLocation={follow ? 'default' : undefined}
+          onTrackUserLocationChange={(event: any) => {
+            if (!event?.nativeEvent?.trackUserLocation) setFollow(false);
+          }}
           zoom={15}
           center={
-            follow && here
-              ? [here.longitude, here.latitude]
-              : [BANGALORE.longitude, BANGALORE.latitude]
+            follow
+              ? undefined
+              : here
+                ? [here.longitude, here.latitude]
+                : [BANGALORE.longitude, BANGALORE.latitude]
           }
         />
-        <UserLocation />
+        <UserLocation animated />
 
         {/* The route is the only saturated thing on the map, by design.
             GeoJSON is lon,lat — the reverse of the order used elsewhere here. */}
@@ -366,6 +393,7 @@ export default function Dashboard() {
           <NavBar items={NAV_ITEMS} activeKey={pane} onSelect={setPane} />
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
+          {locationError ? <Text style={styles.error}>{locationError}</Text> : null}
 
           {pane === 'route' ? (
             <View style={styles.pane}>

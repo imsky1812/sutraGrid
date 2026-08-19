@@ -18,15 +18,15 @@ jest.mock('expo-constants', () => ({ __esModule: true, default: { expoConfig: { 
 
 jest.mock('expo-location', () => ({
   Accuracy: { Lowest: 1, Low: 2, Balanced: 3, High: 4, Highest: 5, BestForNavigation: 6 },
-  requestForegroundPermissionsAsync: jest.fn(),
-  requestBackgroundPermissionsAsync: jest.fn(),
+  requestForegroundPermissionsAsync: jest.fn().mockResolvedValue({ status: 'granted' }),
+  requestBackgroundPermissionsAsync: jest.fn().mockResolvedValue({ status: 'granted' }),
   startLocationUpdatesAsync: jest.fn(),
   stopLocationUpdatesAsync: jest.fn(),
   hasStartedLocationUpdatesAsync: jest.fn(),
   // The dashboard watches position to follow the driver; without this the
   // screen awaits a promise that never settles and the test hangs.
   watchPositionAsync: jest.fn().mockResolvedValue({ remove: jest.fn() }),
-  getCurrentPositionAsync: jest.fn(),
+  getCurrentPositionAsync: jest.fn().mockResolvedValue({ coords: { latitude: 12.97, longitude: 77.59, speed: 0, heading: 0 } }),
 }));
 
 jest.mock('expo-task-manager', () => ({
