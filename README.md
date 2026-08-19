@@ -8,8 +8,10 @@ a map, sends alerts, and reviews where and when rules were broken.
 | `mobile/` | Expo (React Native) vehicle client | current |
 | `admin-dashboard/` | Operator + driver console, vanilla JS | current |
 | `supabase/` | Postgres schema, RLS, Edge Functions, tests | current |
-| `backend-mock/` | Original Node WebSocket relay | superseded |
-| `apk/` | Original Kotlin/Compose client | superseded |
+
+The original Kotlin client (`apk/`) and Node WebSocket relay (`backend-mock/`)
+were removed once the Expo app and Supabase replaced them. They remain in git
+history if ever needed.
 
 **Live**
 
@@ -243,9 +245,10 @@ Things that cost real time here and are worth knowing:
   gate: login succeeded and the console rendered underneath it.
 - **A throw in the background location task kills the app**, since it runs
   outside any React error boundary.
-- The repository's early history contains a leaked Google Maps key. It is gone
-  from the tree and the project no longer uses Google at all, but the key remains
-  in past commits and should be treated as compromised.
+- An early commit contained a Google Maps key. It has since been revoked - the
+  key now returns `REQUEST_DENIED: The provided API key is invalid` - and the
+  project no longer uses Google at all. The dead string remains in history,
+  which is harmless and not worth rewriting published history to remove.
 
 ---
 
@@ -258,4 +261,3 @@ Things that cost real time here and are worth knowing:
 - `position_history` grows at roughly 1,200–3,600 rows per vehicle-hour. The
   prune keeps 30 days.
 - Public OSRM and Nominatim endpoints carry no availability guarantee.
-- `apk/` and `backend-mock/` are superseded and kept only for reference.
