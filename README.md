@@ -1,35 +1,66 @@
 # SUTRA — Real-Time Vehicle Telemetry
 
-A vehicle client that streams live GPS to Supabase, and an operator dashboard
-that renders the fleet on a map.
+A driver's phone streams live GPS to Supabase. An operator watches the fleet on
+a map, sends alerts, and reviews where and when rules were broken.
 
 | Component | What it is | Status |
 | --- | --- | --- |
 | `mobile/` | Expo (React Native) vehicle client | current |
-| `supabase/` | Postgres schema, RLS policies, Directions Edge Function | current |
-| `admin-dashboard/` | Operator dashboard, vanilla JS + Google Maps | **not yet migrated** |
-| `backend-mock/` | Node WebSocket relay | superseded, kept for the dashboard |
-| `apk/` | Original Kotlin/Compose client | superseded, kept for reference |
+| `admin-dashboard/` | Operator + driver console, vanilla JS | current |
+| `supabase/` | Postgres schema, RLS, Edge Functions, tests | current |
+| `backend-mock/` | Original Node WebSocket relay | superseded |
+| `apk/` | Original Kotlin/Compose client | superseded |
 
-> **The operator dashboard is currently blind.** It still subscribes to the Node
-> relay, which no longer receives telemetry now that the app writes to Supabase.
-> Migrating it to Supabase Realtime is the next piece of work.
+**Live**
+
+- Dashboard — https://sutra-control--l1iydflj3v.expo.app
+- Supabase project — `ytqpjxpzhgintwpbujcy`
+- Android APK — built via EAS, see *Setup*
 
 ---
 
-## What is real, and what is staged
+## How it works
 
-The telemetry pipeline is genuine. Some presentation features in the operator
-dashboard are illustrative placeholders and are labelled `MOCK` in the UI.
+```mermaid
+sequenceDiagram
+    participant App as Expo client
+    participant SB as Supabase
+    participant Dash as Console
 
-**Real:** GPS acquisition and background streaming, authentication with
-row-level security, server-enforced emergency authorization, Google Directions
-routing, speed-limit violation logging.
+    App->>SB: sign in (email + password)
+    App->>SB: select vehicles (RLS: own only)
+    Note over App: expo-location background task starts
+    loop every 1s emergency / 3s normal
+        App->>SB: upsert vehicle_positions
+        Note over SB: constraints validate,<br/>triggers append history + violations
+        SB-->>Dash: Realtime postgres_changes
+    end
+    Dash->>SB: insert alert (operators only)
+    SB-->>App: Realtime alert, scoped by RLS
+```
 
-**Mocked (operator dashboard only):** the bypass overlay, the latency gauge, the
-police dispatch payload, the green-corridor signal override, and the
-single-vehicle speed threshold labelled as congestion detection. See the
-dashboard UI for the specifics; each carries a badge.
+One account works in both the app and the dashboard. Role is decided by data,
+not by a separate login.
+
+---
+
+## Roles
+
+| | Operator | Driver |
+| --- | --- | --- |
+| Fleet map and list | every vehicle | own vehicles |
+| Drive history and violations | every vehicle | own vehicles |
+| Send alerts | yes | no |
+| Emergency corridor broadcast | — | only if authorized |
+
+An operator is a row in `operators`. Nobody can self-promote: the table has no
+insert policy. Access is granted by adding an address to `operator_invites`,
+which a trigger honours on signup.
+
+The console is deliberately **one interface for both roles**. Scope is enforced
+by row-level security rather than by hiding things in the browser, so an
+operator's list contains every vehicle because the database returns every
+vehicle.
 
 ---
 
@@ -40,15 +71,19 @@ something a driver can claim.
 
 - `vehicles.is_emergency_authorized` is protected by a `BEFORE UPDATE` trigger,
   because Postgres has no column-level RLS on `UPDATE`. A driver attempting to
-  set it gets `P0001`.
+  set it gets `P0001`. An administrator still can: the check is on
+  `current_user`, not on the `role` setting, which would have made the privilege
+  ungrantable.
 - `vehicle_positions` has **no emergency column at all**. Status is derived by
   joining to `vehicles`, so a modified client has nothing to forge.
 - Range checks on latitude, longitude, speed and heading are database
-  constraints, not application code, so they cannot be bypassed.
-- Routing runs through an Edge Function so the provider can be swapped without
-  an app rebuild. It uses OSRM, which needs no key at all.
+  constraints, not application code.
+- History and violations are written by triggers, so they cannot be skipped by a
+  modified client.
+- Alerts are readable only by their addressee or as a broadcast. Only operators
+  can send, and only under their own identity.
 
-To authorize a vehicle, run this in the Supabase SQL editor:
+Authorize a vehicle:
 
 ```sql
 update public.vehicles
@@ -56,98 +91,102 @@ update public.vehicles
  where vehicle_number = 'KA-03-AB-1234';
 ```
 
+Grant operator access:
+
+```sql
+insert into public.operator_invites (email, note)
+values ('ops@example.com', 'Control room');
+
+select public.sync_operator_invites();  -- if the account already exists
+```
+
+---
+
+## Data model
+
+| Table | Purpose |
+| --- | --- |
+| `vehicles` | One row per vehicle, owned by a driver |
+| `vehicle_positions` | Live position, one upserted row per vehicle |
+| `position_history` | Append-only track, written by trigger |
+| `violations` | Speeding episodes with where, when and peak speed |
+| `alerts`, `alert_receipts` | Operator messages and acknowledgements |
+| `operators`, `operator_invites` | Who may watch the whole fleet |
+| `settings` | Speed limit, shared by trigger and clients |
+| `retention_policy` | Prune windows, as data rather than code |
+
+Violations are recorded as **episodes**, not per frame: one row per period above
+the limit, keeping the worst speed, closed on dropping 5 km/h under it so
+hovering at the limit does not churn.
+
+Retention runs nightly via `pg_cron`. Open violations are exempt, since an old
+row for a vehicle speeding right now is not stale data.
+
+---
+
+## No API keys for maps
+
+| Layer | Provider | Key required |
+| --- | --- | --- |
+| Map rendering | MapLibre GL | none |
+| Tiles | OpenFreeMap (OpenStreetMap data) | none |
+| Routing | OSRM | none |
+| Geocoding | Nominatim | none |
+
+Routing and geocoding go through Edge Functions rather than being called
+directly, so a provider can be swapped by redeploying a function instead of
+shipping a new app. The public OSRM and Nominatim endpoints are free but
+intended for light use; point `ROUTER_URL` and `GEOCODER_URL` at your own
+instances before depending on them.
+
 ---
 
 ## Setup
 
-### 1. Secrets
-
-No key is committed. Copy the examples and fill them in:
+### 1. Configuration
 
 ```bash
-cp mobile/.env.example        mobile/.env
+cp mobile/.env.example               mobile/.env
 cp admin-dashboard/config.example.js admin-dashboard/config.js
 ```
 
-The mobile app needs exactly two values, both Supabase. **There is no maps key**
-— tiles come from OpenFreeMap and routing from OSRM, neither of which requires
-an account, a key, or a quota. Nothing to restrict, rotate, or leak.
+Both need only a Supabase URL and anon key. The anon key is publishable by
+design and constrained by RLS; a `service_role` key must never appear in either.
 
-`supabase/.env` is optional and holds no secret; see `supabase/.env.example`.
-
-> The legacy `admin-dashboard/` still uses Google Maps and still needs a browser
-> key in its `config.js`. That component has not been migrated.
+The mobile app also carries these in `app.config.ts` `extra`, so a build cannot
+ship without them. Environment variables still take precedence when set.
 
 ### 2. Database
 
 ```bash
-npx supabase link --project-ref <your-project-ref>
+npx supabase link --project-ref <ref>
 npx supabase db push
 npx supabase functions deploy directions
-npx supabase secrets set GOOGLE_DIRECTIONS_KEY=<key>
+npx supabase functions deploy geocode
 ```
 
-`link` prompts for the database password. It is not stored in the repo.
-
-### 3. Mobile app — EAS Build (recommended)
-
-Builds in Expo's cloud. Prefer this: the native build compiles a large amount of
-React Native C++, which needs more RAM than a typical laptop has spare.
-
-One-time setup — the first two steps are interactive and prompt for credentials:
+### 3. Dashboard
 
 ```bash
-cd mobile
-npx eas login
-npx eas init                     # writes the project id into app.config.ts
-
-# Build-time env. android/ and .env are gitignored, so EAS cannot see them;
-# these have to live as EAS secrets.
-npx eas secret:create --name EXPO_PUBLIC_SUPABASE_URL      --value https://<ref>.supabase.co
-npx eas secret:create --name EXPO_PUBLIC_SUPABASE_ANON_KEY --value <anon key>
+cd admin-dashboard && python -m http.server 8080
 ```
 
-Then, for an installable APK:
+Deploy with `cd mobile && npx eas deploy --export-dir dashboard-dist`.
 
-```bash
-npm run build:apk                # eas build -p android --profile preview
-```
-
-EAS runs `prebuild` itself from `app.config.ts`, so no local Android SDK, JDK or
-NDK is involved. It returns a download link when the build finishes.
-
-### 3b. Local build (fallback)
-
-Works, but needs the Android SDK and enough free RAM:
+### 4. Android app
 
 ```bash
 cd mobile
 npm install
-npm run prebuild                 # expo prebuild + Gradle memory tuning
-npm run apk                      # gradlew assembleDebug, parallelism capped
+npm run build:apk        # EAS cloud build, all four ABIs
 ```
 
-The APK lands at `mobile/android/app/build/outputs/apk/debug/app-debug.apk`.
-
-Two things this path needs that EAS does not:
-
-- **Memory.** Ninja spawns one clang per core to compile the RN C++ codegen. On
-  a machine with little free RAM this fails with `LLVM ERROR: out of memory`,
-  which surfaces as an opaque Gradle task failure. `npm run apk` caps this via
-  `CMAKE_BUILD_PARALLEL_LEVEL`; note that `org.gradle.workers.max` does *not*
-  reach ninja's parallelism.
-- **A physical device.** The local build is pinned to `arm64-v8a` to halve the
-  native work, so the APK will not install on an x86_64 emulator. Add `x86_64`
-  to `reactNativeArchitectures` in `scripts/tune-gradle.mjs` if you need one.
-
-No map key is needed at any point: tiles come from OpenFreeMap and routing from
-OSRM.
-
-### 4. Operator dashboard (legacy path)
+EAS is the recommended path. A local build works but needs the Android SDK and
+enough free RAM:
 
 ```bash
-cd backend-mock && npm install && npm start
-cd admin-dashboard && python -m http.server 8080
+npm run prebuild         # expo prebuild, then reapply Gradle memory tuning
+npm run apk              # gradlew assembleDebug with ninja parallelism capped
 ```
 
 ---
@@ -155,64 +194,68 @@ cd admin-dashboard && python -m http.server 8080
 ## Testing
 
 ```bash
-cd mobile          && npm test && npm run typecheck   # 45 tests
-cd supabase/tests  && npm install && npm test         # 30 tests
+cd mobile         && npm test && npm run typecheck   # 54 tests
+cd supabase/tests && npm install && npm test         # 85 tests
 ```
 
 Schema and RLS tests run against **PGlite** — Postgres compiled to WASM, in
-process — so no Docker daemon or hosted database is needed. The `auth` schema is
-a stub matching Supabase's shape, so these verify policy logic rather than
-Supabase's own runtime; `db push` against the hosted project is where that gets
-confirmed.
+process — so no Docker and no hosted database are needed. The `auth` schema is a
+stub matching Supabase's shape, so these verify policy logic rather than
+Supabase's own runtime; `db push` is where that gets confirmed.
 
-The test runner is pinned to `--test-concurrency=1`: each test boots its own
-WASM Postgres, and running files in parallel exhausts memory.
+The runner is pinned to `--test-concurrency=1`: each test boots its own WASM
+Postgres, and running files in parallel exhausts memory.
 
 ---
 
 ## Design
 
-The app is dark-only with a single acid-lime accent. The accent marks the live
-thing — the route on the map, the active nav item, the primary action — and
-nothing decorative uses it.
+Dark, with a single acid-lime accent. The accent marks the live thing — the
+route, the active nav item, the primary action — and nothing decorative uses it.
 
-Icon, adaptive icon layers, splash mark and favicon are generated from code:
+Icon, adaptive layers, splash and favicon are generated from code so the mark
+stays editable:
 
 ```bash
 cd mobile && npm run generate-assets
 ```
 
-Editing `scripts/generate-assets.mjs` regenerates all six.
-
 ---
 
-## Data flow
+## Notes for whoever picks this up
 
-```mermaid
-sequenceDiagram
-    participant App as Expo Client
-    participant SB as Supabase
-    participant Dash as Operator Dashboard
+Things that cost real time here and are worth knowing:
 
-    App->>SB: signInWithPassword
-    SB-->>App: session
-    App->>SB: select vehicles (RLS: own only)
-    Note over App: expo-location background task starts
-    loop Every 1s (emergency) / 3s (normal)
-        App->>SB: upsert vehicle_positions
-        Note over SB: constraints validate; RLS checks ownership
-    end
-    SB-->>Dash: Realtime postgres_changes (once migrated)
-```
+- **`legacy-peer-deps` is required** for Expo 57's `react-dom` version skew, but
+  it silently skips missing peers. Three surfaced as build or runtime failures:
+  `@react-native/jest-preset`, `test-renderer`, `expo-linking`. Run
+  `npx expo export` before an EAS build; it catches this class in seconds rather
+  than after a queue wait.
+- **EAS environment variables did not reach the bundle**, despite existing, the
+  profile declaring `environment: preview`, and `eas config` confirming they
+  loaded. Two builds shipped broken before config moved into `app.config.ts`
+  `extra`.
+- **`org.gradle.workers.max` does not reach ninja.** Local native builds need
+  `CMAKE_BUILD_PARALLEL_LEVEL`, which is what `npm run apk` sets. Without it,
+  clang dies with `LLVM ERROR: out of memory` on a machine with little free RAM.
+- **The `hidden` attribute is only `display: none` in the UA stylesheet.** Any
+  author `display` rule beats it, which silently broke the dashboard's sign-in
+  gate: login succeeded and the console rendered underneath it.
+- **A throw in the background location task kills the app**, since it runs
+  outside any React error boundary.
+- The repository's early history contains a leaked Google Maps key. It is gone
+  from the tree and the project no longer uses Google at all, but the key remains
+  in past commits and should be treated as compromised.
 
 ---
 
 ## Known limitations
 
-- Transport for the legacy dashboard is cleartext `ws://`; the Expo client uses
-  HTTPS to Supabase.
-- Sessions in the retired Node relay were in-memory. Supabase sessions persist.
-- There is no rate limiting on sign-in beyond Supabase's own defaults.
-- `node_modules/` and Android `build/` output are ignored and must stay
-  untracked. They were committed early in this project's history, which is why
-  the repository is larger than its source.
+- The mobile app has not been verified on a device by its author; it is
+  validated by tests and as a build artifact.
+- Supabase redirect URLs still point at `localhost:8080`. Update them so
+  password reset returns to the hosted dashboard.
+- `position_history` grows at roughly 1,200–3,600 rows per vehicle-hour. The
+  prune keeps 30 days.
+- Public OSRM and Nominatim endpoints carry no availability guarantee.
+- `apk/` and `backend-mock/` are superseded and kept only for reference.
