@@ -68,6 +68,7 @@ export function buildPositionRow(
 // Module-level state: the background task runs outside React and cannot read
 // component state.
 let activeVehicleId: string | null = null;
+let foregroundWatch: Location.LocationSubscription | null = null;
 let activeDestination: Destination | null = null;
 let activeAlert: string | null = null;
 
@@ -77,6 +78,25 @@ export function setDestination(destination: Destination | null): void {
 
 export function setAlertMessage(message: string | null): void {
   activeAlert = message;
+}
+
+/**
+ * Send one position. Shared by the foreground watch and the background task so
+ * both produce identical rows.
+ */
+async function pushPosition(loc: Coords): Promise<void> {
+  if (!activeVehicleId) return;
+
+  const row = buildPositionRow(activeVehicleId, loc, activeDestination, activeAlert);
+  const { error } = await supabase
+    .from('vehicle_positions')
+    .upsert(row, { onConflict: 'vehicle_id' });
+
+  if (error) {
+    // Dropping the frame is correct: the next one is a second or three away,
+    // and retrying would queue stale positions ahead of fresh ones.
+    console.warn('[telemetry] upsert rejected:', error.message);
+  }
 }
 
 // Defined at module scope so the background runtime can find it. Registering it
@@ -92,22 +112,7 @@ TaskManager.defineTask(TELEMETRY_TASK, async ({ data, error }: any) => {
     const locations: Location.LocationObject[] | undefined = data?.locations;
     if (!locations?.length) return;
 
-    const row = buildPositionRow(
-      activeVehicleId,
-      locations[locations.length - 1],
-      activeDestination,
-      activeAlert,
-    );
-
-    const { error: upsertError } = await supabase
-      .from('vehicle_positions')
-      .upsert(row, { onConflict: 'vehicle_id' });
-
-    if (upsertError) {
-      // Dropping the frame is correct: the next one is a second or three away,
-      // and retrying would queue stale positions ahead of fresh ones.
-      console.warn('[telemetry] upsert rejected:', upsertError.message);
-    }
+    await pushPosition(locations[locations.length - 1]);
   } catch (e) {
     // Losing connectivity, a refreshing token, a malformed frame: all survivable.
     console.warn('[telemetry] frame dropped:', (e as Error)?.message ?? e);
@@ -142,57 +147,90 @@ async function ensureNotificationPermission(): Promise<boolean> {
   }
 }
 
+/**
+ * Begin streaming this vehicle's position.
+ *
+ * Foreground streaming starts as soon as location permission is granted, and is
+ * what makes the vehicle appear on the operator's map. Background streaming is
+ * an upgrade layered on top.
+ *
+ * That split matters. Android 11 and later will not grant background location
+ * from a prompt - the driver has to open Settings and choose "Allow all the
+ * time" - so requiring it before sending anything meant that for most people
+ * nothing was ever sent and the dashboard stayed empty. A refused background
+ * permission now costs only updates while the app is not on screen.
+ */
 export async function startTelemetry(vehicle: Vehicle): Promise<void> {
   const foreground = await Location.requestForegroundPermissionsAsync();
   if (foreground.status !== 'granted') {
     throw new Error('Location permission is required to stream telemetry.');
   }
 
-  const background = await Location.requestBackgroundPermissionsAsync();
-  if (background.status !== 'granted') {
-    throw new Error('Background location is required to keep streaming while driving.');
-  }
-
-  const canNotify = await ensureNotificationPermission();
-
   activeVehicleId = vehicle.id;
+  const interval = cadenceFor(vehicle.is_emergency_authorized);
+  const accuracy = vehicle.is_emergency_authorized
+    ? Location.Accuracy.High
+    : Location.Accuracy.Balanced;
 
-  // Starting a task that is already registered throws on some devices, and
-  // navigating between screens can call this twice.
-  if (await TaskManager.isTaskRegisteredAsync(TELEMETRY_TASK)) {
-    await Location.stopLocationUpdatesAsync(TELEMETRY_TASK).catch(() => {});
+  // Send one position immediately so the vehicle appears on the dashboard the
+  // moment a shift starts, rather than after the first movement.
+  try {
+    await pushPosition(await Location.getCurrentPositionAsync({ accuracy }));
+  } catch (e) {
+    console.warn('[telemetry] first fix failed:', (e as Error)?.message ?? e);
   }
 
-  await Location.startLocationUpdatesAsync(TELEMETRY_TASK, {
-    accuracy: vehicle.is_emergency_authorized
-      ? Location.Accuracy.High
-      : Location.Accuracy.Balanced,
-    timeInterval: cadenceFor(vehicle.is_emergency_authorized),
-    distanceInterval: 0,
-    showsBackgroundLocationIndicator: true,
-    // Requested only when the notification can actually be shown. Asking for a
-    // foreground service whose notification is blocked gets the service killed
-    // by the system, taking the app with it.
-    ...(canNotify
-      ? {
-          foregroundService: {
-            notificationTitle: 'SUTRA Vehicle Client',
-            notificationBody: 'Sharing your location with SUTRA traffic control.',
-            notificationColor: '#D7F94A',
-          },
-        }
-      : {}),
-  });
+  foregroundWatch?.remove();
+  foregroundWatch = await Location.watchPositionAsync(
+    { accuracy, timeInterval: interval, distanceInterval: 0 },
+    (loc) => {
+      void pushPosition(loc).catch(() => {});
+    },
+  );
 
-  if (!canNotify) {
-    console.warn(
-      '[telemetry] notifications not permitted; streaming in foreground only, ' +
-        'since a foreground service without a notification is terminated by Android.',
-    );
+  // Everything past here is the background upgrade, and none of it is allowed
+  // to stop foreground streaming that is already working.
+  try {
+    const background = await Location.requestBackgroundPermissionsAsync();
+    if (background.status !== 'granted') {
+      console.warn('[telemetry] background location refused; foreground streaming only.');
+      return;
+    }
+
+    const canNotify = await ensureNotificationPermission();
+    if (!canNotify) {
+      // A foreground service whose notification is blocked gets killed by
+      // Android, taking the app with it. Not worth the background updates.
+      console.warn('[telemetry] notifications refused; foreground streaming only.');
+      return;
+    }
+
+    // Starting a task that is already registered throws on some devices, and
+    // navigating between screens can call this twice.
+    if (await TaskManager.isTaskRegisteredAsync(TELEMETRY_TASK)) {
+      await Location.stopLocationUpdatesAsync(TELEMETRY_TASK).catch(() => {});
+    }
+
+    await Location.startLocationUpdatesAsync(TELEMETRY_TASK, {
+      accuracy,
+      timeInterval: interval,
+      distanceInterval: 0,
+      showsBackgroundLocationIndicator: true,
+      foregroundService: {
+        notificationTitle: 'SUTRA Vehicle Client',
+        notificationBody: 'Sharing your location with SUTRA traffic control.',
+        notificationColor: '#D7F94A',
+      },
+    });
+  } catch (e) {
+    console.warn('[telemetry] background streaming unavailable:', (e as Error)?.message ?? e);
   }
 }
 
 export async function stopTelemetry(): Promise<void> {
+  foregroundWatch?.remove();
+  foregroundWatch = null;
+
   try {
     const running = await TaskManager.isTaskRegisteredAsync(TELEMETRY_TASK);
     if (running) await Location.stopLocationUpdatesAsync(TELEMETRY_TASK);

@@ -78,3 +78,56 @@ describe('buildPositionRow', () => {
     expect(buildPositionRow('veh-42', loc(10, 90), null, null).vehicle_id).toBe('veh-42');
   });
 });
+
+// Regression: requiring background permission before sending anything meant
+// that on Android 11+, where it cannot be granted from a prompt, nothing was
+// ever sent and the vehicle never appeared on the dashboard.
+describe('startTelemetry permission handling', () => {
+  const Location = require('expo-location');
+  const { startTelemetry } = require('../src/telemetry');
+
+  const vehicle = {
+    id: 'veh-1',
+    vehicle_number: 'KA-03-AB-1234',
+    driver_name: 'A',
+    vehicle_type: 'NORMAL',
+    is_emergency_authorized: false,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    Location.getCurrentPositionAsync.mockResolvedValue({
+      coords: { latitude: 12.97, longitude: 77.59, speed: 0, heading: 0 },
+    });
+    Location.watchPositionAsync.mockResolvedValue({ remove: jest.fn() });
+    Location.requestForegroundPermissionsAsync.mockResolvedValue({ status: 'granted' });
+  });
+
+  it('streams in the foreground when background permission is refused', async () => {
+    Location.requestBackgroundPermissionsAsync.mockResolvedValue({ status: 'denied' });
+
+    await expect(startTelemetry(vehicle)).resolves.toBeUndefined();
+    expect(Location.watchPositionAsync).toHaveBeenCalled();
+  });
+
+  it('does not start a background task when background permission is refused', async () => {
+    Location.requestBackgroundPermissionsAsync.mockResolvedValue({ status: 'denied' });
+
+    await startTelemetry(vehicle);
+    expect(Location.startLocationUpdatesAsync).not.toHaveBeenCalled();
+  });
+
+  it('still refuses to stream without foreground permission', async () => {
+    Location.requestForegroundPermissionsAsync.mockResolvedValue({ status: 'denied' });
+
+    await expect(startTelemetry(vehicle)).rejects.toThrow(/Location permission/i);
+  });
+
+  // Otherwise the operator sees nothing until the driver happens to move.
+  it('sends one position immediately so the vehicle appears at once', async () => {
+    Location.requestBackgroundPermissionsAsync.mockResolvedValue({ status: 'denied' });
+
+    await startTelemetry(vehicle);
+    expect(Location.getCurrentPositionAsync).toHaveBeenCalled();
+  });
+});
