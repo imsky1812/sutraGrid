@@ -5,6 +5,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SessionProvider } from '../src/session';
 import { missingConfig } from '../src/config';
 import { clearLastCrash, CrashReport, installCrashHandler, readLastCrash } from '../src/crashlog';
+import { ErrorBoundary } from '../src/ErrorBoundary';
 import { color, radius, space, type } from '../src/theme';
 
 // Armed at module scope so it covers failures during the first render.
@@ -61,9 +62,11 @@ export default function RootLayout() {
     // The bottom sheet on the dashboard needs this at the root, not around the
     // sheet itself.
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SessionProvider>
-        <Stack screenOptions={{ headerShown: false }} />
-      </SessionProvider>
+      <ErrorBoundary>
+        <SessionProvider>
+          <Stack screenOptions={{ headerShown: false }} />
+        </SessionProvider>
+      </ErrorBoundary>
     </GestureHandlerRootView>
   );
 }

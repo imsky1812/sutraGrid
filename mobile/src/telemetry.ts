@@ -1,3 +1,4 @@
+import { PermissionsAndroid, Platform } from 'react-native';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import { supabase } from './supabase';
@@ -113,6 +114,34 @@ TaskManager.defineTask(TELEMETRY_TASK, async ({ data, error }: any) => {
   }
 });
 
+/**
+ * Android 13 and later require notification permission at runtime. Declaring it
+ * in the manifest is not enough.
+ *
+ * This matters more than it looks: the location updates run as a foreground
+ * service, and a foreground service must show a persistent notification. If the
+ * permission was never granted the notification cannot be posted, Android tears
+ * the service down, and the app goes with it - which is exactly what "the app
+ * closes itself" looks like from the outside.
+ */
+async function ensureNotificationPermission(): Promise<boolean> {
+  if (Platform.OS !== 'android' || typeof Platform.Version !== 'number') return true;
+  if (Platform.Version < 33) return true;
+
+  try {
+    const permission = PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS;
+    if (!permission) return true;
+
+    if (await PermissionsAndroid.check(permission)) return true;
+    const result = await PermissionsAndroid.request(permission);
+    return result === PermissionsAndroid.RESULTS.GRANTED;
+  } catch (e) {
+    // Never block streaming on the permission check itself failing.
+    console.warn('[telemetry] notification permission check failed:', (e as Error)?.message ?? e);
+    return false;
+  }
+}
+
 export async function startTelemetry(vehicle: Vehicle): Promise<void> {
   const foreground = await Location.requestForegroundPermissionsAsync();
   if (foreground.status !== 'granted') {
@@ -123,6 +152,8 @@ export async function startTelemetry(vehicle: Vehicle): Promise<void> {
   if (background.status !== 'granted') {
     throw new Error('Background location is required to keep streaming while driving.');
   }
+
+  const canNotify = await ensureNotificationPermission();
 
   activeVehicleId = vehicle.id;
 
@@ -139,12 +170,26 @@ export async function startTelemetry(vehicle: Vehicle): Promise<void> {
     timeInterval: cadenceFor(vehicle.is_emergency_authorized),
     distanceInterval: 0,
     showsBackgroundLocationIndicator: true,
-    foregroundService: {
-      notificationTitle: 'SUTRA Vehicle Client',
-      notificationBody: 'Sharing your location with SUTRA traffic control.',
-      notificationColor: '#0b6bcb',
-    },
+    // Requested only when the notification can actually be shown. Asking for a
+    // foreground service whose notification is blocked gets the service killed
+    // by the system, taking the app with it.
+    ...(canNotify
+      ? {
+          foregroundService: {
+            notificationTitle: 'SUTRA Vehicle Client',
+            notificationBody: 'Sharing your location with SUTRA traffic control.',
+            notificationColor: '#D7F94A',
+          },
+        }
+      : {}),
   });
+
+  if (!canNotify) {
+    console.warn(
+      '[telemetry] notifications not permitted; streaming in foreground only, ' +
+        'since a foreground service without a notification is terminated by Android.',
+    );
+  }
 }
 
 export async function stopTelemetry(): Promise<void> {
