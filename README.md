@@ -276,6 +276,14 @@ Postgres, and running files in parallel exhausts memory.
 
 ---
 
+## Project record
+
+`docs/project-record.html` is the running record of the project: what it is,
+how it is built, what was done and when, and what is still open. Open it in a
+browser. It is updated with every change to the project.
+
+---
+
 ## Design
 
 Dark, with a single acid-lime accent. The accent marks the live thing — the

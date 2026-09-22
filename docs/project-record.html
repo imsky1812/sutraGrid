@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SUTRA Project Record</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground: #F6F7F2;
+    --paper: #FFFFFF;
+    --ink: #161A12;
+    --muted: #5C6354;
+    --line: #DCE0D3;
+    --accent: #4E6B00;
+    --accent-soft: #EEF5D6;
+    --real: #1F7A3A;
+    --real-soft: #E3F3E7;
+    --sim: #9A5B00;
+    --sim-soft: #FBEFD9;
+    --warn: #B3261E;
+    --code-bg: #EFF1EA;
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0D0F0B;
+      --paper: #161913;
+      --ink: #EEF1E8;
+      --muted: #9CA096;
+      --line: #2A2F24;
+      --accent: #D7F94A;
+      --accent-soft: #232A12;
+      --real: #7FD99A;
+      --real-soft: #15261A;
+      --sim: #F5B63B;
+      --sim-soft: #2A2111;
+      --warn: #FF8A7D;
+      --code-bg: #1E2219;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0D0F0B;
+    --paper: #161913;
+    --ink: #EEF1E8;
+    --muted: #9CA096;
+    --line: #2A2F24;
+    --accent: #D7F94A;
+    --accent-soft: #232A12;
+    --real: #7FD99A;
+    --real-soft: #15261A;
+    --sim: #F5B63B;
+    --sim-soft: #2A2111;
+    --warn: #FF8A7D;
+    --code-bg: #1E2219;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 16px;
+    line-height: 1.6;
+    padding-inline: 20px;
+    padding-block: 0 64px;
+  }
+  .page {
+    max-width: 1080px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr);
+    gap: 48px;
+  }
+  nav.toc {
+    position: sticky;
+    top: calc(env(safe-area-inset-top, 0px) + 24px);
+    align-self: start;
+    padding-top: 40px;
+    font-size: 13.5px;
+  }
+  nav.toc strong {
+    display: block;
+    font-family: var(--display);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  nav.toc a { color: var(--muted); text-decoration: none; }
+  nav.toc a:hover, nav.toc a:focus-visible { color: var(--ink); text-decoration: underline; }
+
+  main { min-width: 0; }
+  header.doc-head {
+    padding-block: 40px 28px;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 8px;
+  }
+  .eyebrow {
+    font-family: var(--display);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  h1 {
+    font-family: var(--display);
+    font-weight: 800;
+    font-size: clamp(34px, 5vw, 48px);
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin: 10px 0 14px;
+    text-wrap: balance;
+  }
+  .lede { font-size: 18px; color: var(--muted); max-width: 64ch; margin: 0; }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 24px;
+    margin-top: 20px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .meta b { color: var(--ink); font-weight: 600; }
+
+  section { padding-block: 36px 8px; border-bottom: 1px solid var(--line); }
+  section:last-of-type { border-bottom: 0; }
+  h2 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 26px;
+    letter-spacing: -0.01em;
+    margin: 0 0 14px;
+    text-wrap: balance;
+  }
+  h3 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 17px;
+    margin: 24px 0 8px;
+  }
+  p, li { max-width: 68ch; }
+  p { margin: 0 0 14px; }
+  ul { padding-left: 20px; margin: 0 0 14px; }
+  li { margin-bottom: 6px; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  code, .mono { font-family: var(--mono); font-size: 0.86em; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre.sql {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.5;
+    margin: 0 0 14px;
+  }
+
+  .links {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+  .links div { background: var(--paper); padding: 14px 16px; }
+  .links span {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .links a, .links code { word-break: break-all; font-size: 14px; }
+  .links code { background: none; padding: 0; }
+
+  .table-wrap { overflow-x: auto; margin: 0 0 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  th {
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: var(--ground);
+  }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  .status {
+    display: inline-block;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 2px 9px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .status.real { color: var(--real); background: var(--real-soft); }
+  .status.sim { color: var(--sim); background: var(--sim-soft); }
+
+  .timeline { list-style: none; padding: 0; margin: 0 0 16px; }
+  .timeline li {
+    display: grid;
+    grid-template-columns: 112px minmax(0, 1fr);
+    gap: 16px;
+    padding: 12px 0;
+    border-top: 1px solid var(--line);
+    max-width: none;
+  }
+  .timeline li:first-child { border-top: 0; }
+  .timeline time { font-family: var(--mono); font-size: 13px; color: var(--muted); padding-top: 2px; font-variant-numeric: tabular-nums; }
+  .timeline b { display: block; font-weight: 600; margin-bottom: 2px; }
+  .timeline p { margin: 0; color: var(--muted); font-size: 14.5px; }
+
+  .callout {
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--sim);
+    background: var(--paper);
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin: 0 0 16px;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+
+  .todo { list-style: none; padding: 0; }
+  .todo li {
+    position: relative;
+    padding-left: 28px;
+    margin-bottom: 12px;
+  }
+  .todo li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 5px;
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--muted);
+    border-radius: 3px;
+  }
+
+  pre.mermaid { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 16px; overflow-x: auto; }
+
+  @media (max-width: 860px) {
+    .page { grid-template-columns: minmax(0, 1fr); gap: 0; }
+    nav.toc { display: none; }
+    .timeline li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+  html { scroll-behavior: smooth; }
+</style>
+</head>
+<body>
+<div class="page">
+  <nav class="toc" aria-label="Contents">
+    <strong>Contents</strong>
+    <ol>
+      <li><a href="#status">Where it stands</a></li>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#timeline">What was done</a></li>
+      <li><a href="#features">Features</a></li>
+      <li><a href="#corridor">Green corridor</a></li>
+      <li><a href="#security">Security</a></li>
+      <li><a href="#data">Data model</a></li>
+      <li><a href="#quality">Tests</a></li>
+      <li><a href="#pitch">Legal notes</a></li>
+      <li><a href="#limits">Known limits</a></li>
+      <li><a href="#next">Open actions</a></li>
+      <li><a href="#lessons">Lessons</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <header class="doc-head">
+      <div class="eyebrow">Project record · as of 22 September 2026</div>
+      <h1>SUTRA: live vehicle telemetry and green corridors</h1>
+      <p class="lede">An Android app streams each vehicle's position to Supabase. A web console lets traffic control watch the fleet and send alerts, and authorized emergency vehicles can open a green corridor that warns drivers ahead to give way.</p>
+      <div class="meta">
+        <span><b>App</b> Expo SDK 57 · React Native 0.86</span>
+        <span><b>Backend</b> Supabase Postgres, Realtime, Edge Functions</span>
+        <span><b>Maps</b> MapLibre + OpenStreetMap, no API keys</span>
+      </div>
+    </header>
+
+    <section id="status">
+      <h2>Where it stands</h2>
+      <p>Everything below is built, tested, deployed and pushed to <code>main</code>. The newest APK has not yet been checked on a phone: the beep, the corridor on a real road and the keyboard fix all pass tests but still need a device check.</p>
+      <div class="links">
+        <div><span>Operator console</span><a href="https://sutra-control.expo.app">sutra-control.expo.app</a></div>
+        <div><span>Source</span><a href="https://github.com/imsky1812/sutraGrid">github.com/imsky1812/sutraGrid</a></div>
+        <div><span>Latest APK</span><code>sutra-vehicle-keyboard-fix.apk</code><br><small class="mono">EAS build 917ec517</small></div>
+        <div><span>Supabase project</span><code>ytqpjxpzhgintwpbujcy</code></div>
+        <div><span>EAS project</span><code>@imsky1812s-org/sutra-vehicle</code></div>
+        <div><span>Edge Functions</span><code>directions · geocode · corridor</code></div>
+      </div>
+    </section>
+
+    <section id="architecture">
+      <h2>Architecture</h2>
+      <p>No custom server. The phone writes to Postgres, the database does the work in triggers, and Realtime pushes changes to whoever may see them. Row-level security decides who sees what, so the app and the console share one login and one set of rules.</p>
+<pre class="mermaid">
+flowchart LR
+  A[Driver app<br/>Expo, Android] -- position every 1-3 s --> DB[(Supabase Postgres<br/>RLS + triggers)]
+  DB -- Realtime --> C[Operator console<br/>MapLibre web]
+  C -- alerts --> DB
+  DB -- Realtime alerts --> A
+  A -- route, places, corridor plan --> EF[Edge Functions<br/>directions, geocode, corridor]
+  EF --> OSRM[OSRM routing]
+  EF --> NOM[Nominatim search]
+  EF --> OVP[Overpass signals]
+</pre>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Piece</th><th>What it is</th><th>Where it runs</th></tr></thead>
+          <tbody>
+            <tr><td>Driver app</td><td>Expo / React Native, MapLibre map, background location, notifications</td><td>Android APK built on EAS</td></tr>
+            <tr><td>Operator console</td><td>Plain HTML/JS with MapLibre GL and Supabase JS</td><td>EAS Hosting</td></tr>
+            <tr><td>Database</td><td>10 migrations: tables, RLS, triggers, retention, pg_cron</td><td>Supabase</td></tr>
+            <tr><td>Edge Functions</td><td><code>directions</code> (OSRM), <code>geocode</code> (Nominatim), <code>corridor</code> (OSRM + Overpass)</td><td>Supabase, JWT required</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="timeline">
+      <h2>What was done</h2>
+      <ol class="timeline">
+        <li><time>27–28 May</time><div><b>Prototype</b><p>Kotlin Android client, a Node WebSocket relay, a Google Maps dashboard with mocked traffic-police responses.</p></div></li>
+        <li><time>17 Aug</time><div><b>Critical review and fixes</b><p>Removed a leaked Maps key and untracked build output, fixed an XSS in the dashboard, added telemetry validation and real authentication, and labelled mock features as mocks.</p></div></li>
+        <li><time>18 Aug</time><div><b>Rewrite on Expo and Supabase</b><p>New schema with RLS, a new app (login, vehicles, background telemetry, routing), and a new dark/lime design with generated icon and splash. Google Maps replaced with key-free MapLibre, OSRM and Nominatim. Drive history, speeding violations, operator alerts, retention and a role-scoped console built. First EAS builds.</p></div></li>
+        <li><time>19 Aug</time><div><b>Cleanup and device fixes</b><p>Removed the old Kotlin client and Node relay, rewrote the README, centred the map on the real location, added crash reporting on next launch.</p></div></li>
+        <li><time>21 Sep</time><div><b>Stability</b><p>Fixed the app closing by itself (the missing notification permission killed the background service) and made position streaming work without background permission, so vehicles appear on the console.</p></div></li>
+        <li><time>22 Sep</time><div><b>Alerts, green corridor, layout</b><p>Beeping alerts and automatic overspeed warnings. The green corridor end to end. Internal database functions locked down. Keyboard and screen-edge alignment fixed across the app. This record added to the repository as <code>docs/project-record.html</code>, kept up to date with every change.</p></div></li>
+      </ol>
+    </section>
+
+    <section id="features">
+      <h2>Features</h2>
+      <h3>Driver app</h3>
+      <ul>
+        <li>Email sign-in; register and choose a vehicle.</li>
+        <li>Streams position every 3 s, or every 1 s for emergency vehicles; works in the background when allowed, and in the foreground if not.</li>
+        <li>Map follows the driver. Search places, or long-press the map to set a destination; fastest route drawn.</li>
+        <li>Alerts beep, vibrate and show a notification with no tap needed.</li>
+        <li>Crashes are captured and shown on the next launch.</li>
+      </ul>
+      <h3>Operator console</h3>
+      <ul>
+        <li>One interface for operators and drivers. Operators see the whole fleet; drivers see only their own vehicles. The database enforces this, not the browser.</li>
+        <li>Live map and list with speed, plate, offline status; filters and sorting.</li>
+        <li>A week of drive history and speeding insights: when, where and how fast.</li>
+        <li>Send alerts to one vehicle or broadcast to all, with category and severity.</li>
+        <li>Active green corridors with junction states and drivers warned.</li>
+      </ul>
+      <h3>Alerts</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Source</th><th>Category</th><th>When it fires</th></tr></thead>
+          <tbody>
+            <tr><td>Operator</td><td>Congestion, hazard, rule, message</td><td>On demand</td></tr>
+            <tr><td>Database, on speeding</td><td>Rule: “Overspeeding: 95 km/h in a 80 km/h zone”</td><td>Once per speeding episode</td></tr>
+            <tr><td>Green corridor</td><td>Emergency: “keep left and give way”</td><td>Once per vehicle per corridor</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>Retention</h3>
+      <p>A nightly job keeps position history 30 days, alerts 30 days, ended corridors 30 days and speeding records a year. The windows are rows in <code>retention_policy</code>, not code.</p>
+    </section>
+
+    <section id="corridor">
+      <h2>Green corridor</h2>
+      <p>An emergency vehicle that an operator has authorized picks a destination and taps <b>Start green corridor</b>. It runs until arrival (within 50 m), until the driver ends it, or for an hour.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Part</th><th>Status</th><th>How</th></tr></thead>
+          <tbody>
+            <tr><td>Fastest route, drawn in green</td><td><span class="status real">Real</span></td><td>OSRM, speed-limit based</td></tr>
+            <tr><td>Drivers ahead warned to give way, with a beep</td><td><span class="status real">Real</span></td><td>Within 150 m of the route, up to 1.5 km ahead</td></tr>
+            <tr><td>Actual junctions on the route</td><td><span class="status real">Real</span></td><td>OpenStreetMap traffic-signal nodes</td></tr>
+            <tr><td>Junctions turning amber at 500 m, green at 200 m</td><td><span class="status sim">Simulated</span></td><td>State in the database, labelled SIMULATED on every screen</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>All the per-second work runs in one Postgres trigger, so it keeps working while the ambulance app is in the background. The ambulance is not beeped for overspeeding during a corridor, though the violation is still recorded.</p>
+    </section>
+
+    <section id="security">
+      <h2>Security</h2>
+      <ul>
+        <li>Emergency privilege is a database flag only an administrator can set; a trigger blocks drivers from granting it to themselves.</li>
+        <li>Every table has row-level security. Corridor tables have no client write policy at all; corridors open and close only through two checked functions.</li>
+        <li>Internal database functions are closed to the public API (migration 10). Before that, anyone could trigger data pruning or the operator-invite sync.</li>
+        <li>No map or routing API keys anywhere. The Supabase anon key in the app is public by design; RLS is the protection.</li>
+        <li>Operators are granted through <code>operator_invites</code>; nobody can promote themselves.</li>
+      </ul>
+    </section>
+
+    <section id="data">
+      <h2>Data model</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Table</th><th>Holds</th></tr></thead>
+          <tbody>
+            <tr><td><code>vehicles</code></td><td>One row per vehicle, owned by a driver; emergency flag</td></tr>
+            <tr><td><code>vehicle_positions</code></td><td>Live position, one row per vehicle, upserted</td></tr>
+            <tr><td><code>position_history</code></td><td>Append-only track, written by trigger</td></tr>
+            <tr><td><code>violations</code></td><td>Speeding episodes: where, when, peak speed</td></tr>
+            <tr><td><code>alerts</code>, <code>alert_receipts</code></td><td>Operator and system alerts, and acknowledgements</td></tr>
+            <tr><td><code>corridors</code> and 3 child tables</td><td>Route points, simulated junction states, drivers warned</td></tr>
+            <tr><td><code>operators</code>, <code>operator_invites</code></td><td>Who may watch the whole fleet</td></tr>
+            <tr><td><code>settings</code>, <code>retention_policy</code></td><td>Speed limit (80 km/h); prune windows</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="quality">
+      <h2>Tests</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Suite</th><th>Count</th><th>Runs on</th></tr></thead>
+          <tbody>
+            <tr><td>App: screens, alerts, corridor, telemetry</td><td class="num">99 passing</td><td>Jest</td></tr>
+            <tr><td>Database rules and triggers, Edge Function handlers</td><td class="num">147 passing</td><td>PGlite (Postgres in WASM), no Docker</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Every build is also bundle-checked with <code>expo export</code> before going to EAS. That catches missing dependencies in seconds instead of after a queued build.</p>
+    </section>
+
+    <section id="pitch">
+      <h2>Legal notes for the pitch</h2>
+      <div class="callout">
+        <p><b>Signals are simulated on purpose.</b> In India green corridors are run by the traffic police, mostly for organ transport. A private app has no authority over traffic lights. The simulation shows what connecting to a city’s adaptive signal system would add; that step needs the authorities.</p>
+      </div>
+      <ul>
+        <li>Warning drivers to make way is lawful and useful: since 2019, not giving way to an emergency vehicle carries a ₹10,000 fine under Section 194E of the Motor Vehicles Act.</li>
+        <li>Continuous location tracking falls under the DPDP Act 2023 and needs proper consent and a privacy notice before real use.</li>
+        <li>Alerts need no tap, because handling a phone while driving is itself an offence.</li>
+        <li>The Tesla Fleet API does not fit: it covers only consenting Tesla owners’ cars, has no traffic or signal data, and Tesla has few cars in India.</li>
+        <li>This is not legal advice; have it reviewed before a real deployment.</li>
+      </ul>
+    </section>
+
+    <section id="limits">
+      <h2>Known limits</h2>
+      <ul>
+        <li>Alerts reach a running app, including in the background. A fully closed app gets nothing; that needs FCM push.</li>
+        <li>“Fastest” route uses speed limits, not live traffic; live traffic needs the authority’s feed or a paid provider.</li>
+        <li>Only drivers running SUTRA get corridor warnings.</li>
+        <li>The public OSRM, Nominatim and Overpass servers have no uptime guarantee. The junction lookup is often refused or rate-limited, so it retries from the phone; a corridor still starts without junctions if both fail.</li>
+        <li>EAS build artifacts expire after 14 days.</li>
+      </ul>
+    </section>
+
+    <section id="next">
+      <h2>Open actions</h2>
+      <ul class="todo">
+        <li>Install <code>sutra-vehicle-keyboard-fix.apk</code> and check: the beep on a new alert, text boxes above the keyboard, the layout clear of the status and navigation bars.</li>
+        <li>Add <code>https://sutra-control.expo.app</code> to Supabase → Authentication → URL Configuration → Redirect URLs, so password-reset emails return to the console.</li>
+        <li>To try a corridor, authorize a vehicle in the Supabase SQL editor:
+<pre class="sql">update public.vehicles
+   set is_emergency_authorized = true, vehicle_type = 'AMBULANCE'
+ where vehicle_number = 'UP 32 G 6789';</pre>
+          Seeing a driver get warned needs a second phone on the route.</li>
+        <li>Optional: enable leaked-password protection in Supabase Auth (flagged by the security advisor).</li>
+      </ul>
+    </section>
+
+    <section id="lessons">
+      <h2>Lessons</h2>
+      <ul>
+        <li><b>Silent peer skips.</b> <code>legacy-peer-deps</code> is needed for Expo 57, but it silently skipped three required packages; <code>expo export</code> before every build catches this.</li>
+        <li><b>Config over env.</b> EAS environment variables never reached the bundle; config lives in <code>app.config.ts</code> instead.</li>
+        <li><b>Edge to edge.</b> Android draws under the system bars and no longer resizes for the keyboard, so every edge offset needs safe-area insets and keyboard avoidance needs padding.</li>
+        <li><b>Background tasks.</b> A throw in the background location task kills the app, and a foreground service without notification permission is killed by Android.</li>
+        <li><b>Overpass.</b> It refuses generic user agents (including okhttp, which React Native sends), so always send a real User-Agent and <code>Accept: application/json</code>.</li>
+        <li><b>Public functions.</b> Every function in the public schema is a REST endpoint; SECURITY DEFINER helpers need an explicit revoke.</li>
+      </ul>
+    </section>
+  </main>
+</div>
+
+<!-- The published copy renders Mermaid natively; opened from disk it needs this. -->
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs';
+  const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+  mermaid.initialize({ startOnLoad: true, theme: dark ? 'dark' : 'neutral' });
+</script>
+</body>
+</html>
