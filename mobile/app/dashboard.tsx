@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
+  Keyboard,
   Pressable,
   StyleSheet,
   Text,
@@ -12,6 +11,7 @@ import * as Location from 'expo-location';
 import { Camera, GeoJSONSource, Layer, Map, Marker, UserLocation } from '@maplibre/maplibre-react-native';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { StatusBar } from 'expo-status-bar';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { listMyVehicles, Vehicle } from '../src/vehicles';
 import { setAlertMessage, setDestination, startTelemetry, stopTelemetry } from '../src/telemetry';
@@ -91,6 +91,33 @@ export default function Dashboard() {
 
   const sheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['30%', '82%'], []);
+  // The app draws edge to edge, under the status and navigation bars, so every
+  // offset from a screen edge has to include them.
+  const insets = useSafeAreaInsets();
+
+  // Android no longer shrinks the window for the keyboard when drawing edge to
+  // edge, so the sheet's fields sat underneath it. While typing, the sheet
+  // opens to the top and drops its header and tabs, which puts the field near
+  // the top of the screen: above the keyboard on any phone.
+  const [typing, setTyping] = useState(false);
+  const sheetIndex = useRef(0);
+  const indexBeforeTyping = useRef(0);
+
+  useEffect(() => {
+    const shown = Keyboard.addListener('keyboardDidShow', () => {
+      indexBeforeTyping.current = sheetIndex.current;
+      setTyping(true);
+      sheetRef.current?.snapToIndex(1);
+    });
+    const hidden = Keyboard.addListener('keyboardDidHide', () => {
+      setTyping(false);
+      sheetRef.current?.snapToIndex(indexBeforeTyping.current);
+    });
+    return () => {
+      shown.remove();
+      hidden.remove();
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -445,7 +472,7 @@ export default function Dashboard() {
 
       {/* Alerts from traffic control, and the corridor strip when one is live. */}
       {(alerts.length > 0 || corridorId) && (
-        <View style={styles.alertStack}>
+        <View style={[styles.alertStack, { top: insets.top + TOP_BAR_CLEARANCE }]}>
           {corridorId ? (
             <View style={styles.corridorStrip}>
               <View
@@ -491,7 +518,7 @@ export default function Dashboard() {
       )}
 
       {/* Floating status bar, echoing the reference's top search pill. */}
-      <View style={styles.topBar}>
+      <View style={[styles.topBar, { top: insets.top + space.md }]}>
         <View style={styles.statusPill}>
           <View style={styles.liveDot} />
           <View style={styles.flex}>
@@ -520,10 +547,21 @@ export default function Dashboard() {
         ref={sheetRef}
         index={0}
         snapPoints={snapPoints}
+        topInset={insets.top}
+        onChange={(index) => {
+          sheetIndex.current = index;
+        }}
+        // Matches the window mode Expo sets. The default, adjustPan, would tell
+        // the sheet the window pans, which it does not.
+        android_keyboardInputMode="adjustResize"
         backgroundStyle={styles.sheetBg}
         handleIndicatorStyle={styles.sheetHandle}
       >
-        <BottomSheetScrollView contentContainerStyle={styles.sheet}>
+        <BottomSheetScrollView
+          contentContainerStyle={[styles.sheet, { paddingBottom: insets.bottom + space.xxl }]}
+          keyboardShouldPersistTaps="handled"
+        >
+          {typing ? null : (
           <View style={styles.sheetHeader}>
             <View style={styles.flex}>
               {vehicle.is_emergency_authorized ? (
@@ -542,7 +580,9 @@ export default function Dashboard() {
             </View>
           </View>
 
-          <NavBar items={NAV_ITEMS} activeKey={pane} onSelect={setPane} />
+          )}
+
+          {typing ? null : <NavBar items={NAV_ITEMS} activeKey={pane} onSelect={setPane} />}
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
           {locationError ? <Text style={styles.error}>{locationError}</Text> : null}
@@ -697,6 +737,9 @@ export default function Dashboard() {
   );
 }
 
+/** Height of the floating status bar plus a gap, below the status-bar inset. */
+const TOP_BAR_CLEARANCE = 76;
+
 function formatDistance(metres: number): string {
   return metres >= 1000 ? `${(metres / 1000).toFixed(1)} km` : `${Math.round(metres)} m`;
 }
@@ -708,7 +751,6 @@ const styles = StyleSheet.create({
 
   topBar: {
     position: 'absolute',
-    top: space.xxl + space.xl,
     left: space.lg,
     right: space.lg,
     flexDirection: 'row',
@@ -732,7 +774,6 @@ const styles = StyleSheet.create({
 
   alertStack: {
     position: 'absolute',
-    top: space.xxl + space.xxl + space.xl,
     left: space.lg,
     right: space.lg,
     gap: space.sm,
@@ -788,7 +829,7 @@ const styles = StyleSheet.create({
 
   sheetBg: { backgroundColor: color.surface, borderRadius: radius.sheet },
   sheetHandle: { backgroundColor: color.faint, width: 40 },
-  sheet: { padding: space.xl, paddingBottom: space.xxl + space.xl, gap: space.lg },
+  sheet: { padding: space.xl, gap: space.lg },
   sheetHeader: { flexDirection: 'row', gap: space.md },
   sheetTitle: { ...type.title, fontSize: 21, marginTop: space.sm },
 

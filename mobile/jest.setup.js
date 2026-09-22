@@ -44,3 +44,9 @@ jest.mock('expo-notifications', () => ({
   requestPermissionsAsync: jest.fn().mockResolvedValue({ granted: true }),
   scheduleNotificationAsync: jest.fn().mockResolvedValue('id'),
 }));
+
+// Screens read the status-bar and navigation-bar heights from here. The
+// package's own mock reports zero insets.
+jest.mock('react-native-safe-area-context', () =>
+  require('react-native-safe-area-context/jest/mock').default,
+);

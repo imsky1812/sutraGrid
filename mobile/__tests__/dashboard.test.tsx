@@ -1,5 +1,6 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { Keyboard } from 'react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
 const mockStartTelemetry = jest.fn().mockResolvedValue(undefined);
 const mockStopTelemetry = jest.fn().mockResolvedValue(undefined);
@@ -24,12 +25,15 @@ jest.mock('@maplibre/maplibre-react-native', () => {
   };
 });
 
+const mockSnapToIndex = jest.fn();
+
 jest.mock('@gorhom/bottom-sheet', () => {
   const React2 = require('react');
   const { View, ScrollView } = require('react-native');
-  const Sheet = React2.forwardRef((p: any, _ref: any) =>
-    React2.createElement(View, null, p.children),
-  );
+  const Sheet = React2.forwardRef((p: any, ref: any) => {
+    React2.useImperativeHandle(ref, () => ({ snapToIndex: mockSnapToIndex }));
+    return React2.createElement(View, null, p.children);
+  });
   return {
     __esModule: true,
     default: Sheet,
@@ -222,6 +226,54 @@ describe('Dashboard', () => {
     await waitFor(() => expect(mockStartTelemetry).toHaveBeenCalled());
     await unmount();
     expect(mockStopTelemetry).toHaveBeenCalled();
+  });
+
+  describe('keyboard', () => {
+    // Captures the screen's keyboard listeners so a test can open the keyboard.
+    const keyboard = () => {
+      const handlers: Record<string, () => void> = {};
+      jest.spyOn(Keyboard, 'addListener').mockImplementation((event: any, handler: any) => {
+        handlers[event] = handler;
+        return { remove: jest.fn() } as any;
+      });
+      return {
+        show: () => act(() => handlers.keyboardDidShow?.()),
+        hide: () => act(() => handlers.keyboardDidHide?.()),
+      };
+    };
+
+    afterEach(() => jest.restoreAllMocks());
+
+    // The sheet opens to the top so the search box sits above the keyboard.
+    it('raises the sheet when the keyboard opens', async () => {
+      const kb = keyboard();
+      await render(<Dashboard />);
+      await waitFor(() => expect(screen.getByPlaceholderText(/Hospital, street/)).toBeTruthy());
+      await kb.show();
+      expect(mockSnapToIndex).toHaveBeenLastCalledWith(1);
+    });
+
+    // Header and tabs step aside so the field is near the top of the sheet,
+    // which is above the keyboard on any phone.
+    it('moves the text box to the top of the sheet while typing', async () => {
+      const kb = keyboard();
+      await render(<Dashboard />);
+      await waitFor(() => expect(screen.getByText('No destination set')).toBeTruthy());
+      await kb.show();
+      expect(screen.queryByText('No destination set')).toBeNull();
+      expect(screen.queryByLabelText('Green corridor')).toBeNull();
+      expect(screen.getByPlaceholderText(/Hospital, street/)).toBeTruthy();
+    });
+
+    it('puts the sheet back when the keyboard closes', async () => {
+      const kb = keyboard();
+      await render(<Dashboard />);
+      await waitFor(() => expect(screen.getByText('No destination set')).toBeTruthy());
+      await kb.show();
+      await kb.hide();
+      expect(mockSnapToIndex).toHaveBeenLastCalledWith(0);
+      expect(screen.getByText('No destination set')).toBeTruthy();
+    });
   });
 
   it('reports a vehicle that does not belong to the user', async () => {

@@ -1,19 +1,20 @@
 import { useState } from 'react';
 import {
   KeyboardAvoidingView,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { supabase } from '../src/supabase';
 import { Badge, Field, Label, PillButton } from '../src/ui';
 import { color, space, type } from '../src/theme';
 
 export default function Login() {
+  const insets = useSafeAreaInsets();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -47,11 +48,16 @@ export default function Login() {
   return (
     <View style={styles.screen}>
       <StatusBar style="light" />
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      {/* Padding on both platforms: drawing edge to edge, Android no longer
+          resizes the window for the keyboard, so nothing else lifts the form. */}
+      <KeyboardAvoidingView style={styles.flex} behavior="padding">
+        <ScrollView
+          contentContainerStyle={[
+            styles.content,
+            { paddingTop: insets.top + space.xl, paddingBottom: insets.bottom + space.xl },
+          ]}
+          keyboardShouldPersistTaps="handled"
+        >
           <View style={styles.header}>
             <Badge label="Vehicle client" live />
             <Text style={type.display}>

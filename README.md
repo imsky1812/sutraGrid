@@ -262,7 +262,7 @@ npm run apk              # gradlew assembleDebug with ninja parallelism capped
 ## Testing
 
 ```bash
-cd mobile         && npm test && npm run typecheck   # 93 tests
+cd mobile         && npm test && npm run typecheck   # 99 tests
 cd supabase/tests && npm install && npm test         # 147 tests
 ```
 
