@@ -39,6 +39,7 @@ sequenceDiagram
     end
     Dash->>SB: insert alert (operators only)
     SB-->>App: Realtime alert, scoped by RLS
+    Note over App: beep + notification
 ```
 
 One account works in both the app and the dashboard. Role is decided by data,
@@ -53,7 +54,7 @@ not by a separate login.
 | Fleet map and list | every vehicle | own vehicles |
 | Drive history and violations | every vehicle | own vehicles |
 | Send alerts | yes | no |
-| Emergency corridor broadcast | — | only if authorized |
+| Green corridor | watch all | open one, only if authorized |
 
 An operator is a row in `operators`. Nobody can self-promote: the table has no
 insert policy. Access is granted by adding an address to `operator_invites`,
@@ -104,6 +105,58 @@ select public.sync_operator_invites();  -- if the account already exists
 
 ---
 
+## Alerts that make a sound
+
+Every new alert beeps (a bundled three-pulse tone), vibrates and posts a
+max-importance notification on its own Android channel. Nothing needs a tap:
+a driver should never have to touch the phone to hear a warning.
+
+Alerts come from three places:
+
+| Source | Category | When |
+| --- | --- | --- |
+| An operator on the dashboard | CONGESTION, HAZARD, RULE, MESSAGE | on demand |
+| The database, on a speeding episode | RULE, "Overspeeding: 95 km/h in a 80 km/h zone" | once per episode |
+| A green corridor | EMERGENCY, "Emergency vehicle ... give way" | once per vehicle per corridor |
+
+Alerts ride Supabase Realtime, so they arrive while the app is running
+(including in the background while location sharing keeps it alive). A phone
+with the app fully closed hears nothing; that would need FCM push.
+
+---
+
+## Green corridor
+
+An emergency vehicle an operator has authorized picks a destination and opens a
+corridor. What is real and what is not is stated everywhere it is shown,
+because this is meant to be put in front of traffic authorities:
+
+| Part | Status |
+| --- | --- |
+| Fastest route (OSRM), drawn in green | real |
+| SUTRA drivers ahead on the route warned to give way, with a beep | real |
+| The actual junctions on the route (OpenStreetMap `highway=traffic_signals`) | real |
+| Those junctions turning amber, then green, as the vehicle approaches | **simulated** |
+
+SUTRA does not and cannot legally control traffic lights. The simulated states
+show what integrating with a city's adaptive signal control would do.
+
+All the per-frame work happens in one Postgres trigger on
+`vehicle_positions`, so it keeps working when the ambulance's app is in the
+background. On each position it finds the vehicle's progress along the stored
+route, advances junction states (pre-empt within 500 m, green within 200 m,
+passed once cleared), warns vehicles within 150 m of the route in the next
+1.5 km, and ends the corridor on arrival. Corridors also lapse after an hour.
+
+Design: `docs/superpowers/specs/2026-09-22-green-corridor-design.md`.
+
+Limits worth saying out loud in a pitch: OSRM's "fastest" uses speed limits,
+not live traffic; only drivers running SUTRA are warned; the public Overpass
+servers that supply junctions are often busy, so the lookup is retried from
+the phone and a corridor starts without junctions if both fail.
+
+---
+
 ## Data model
 
 | Table | Purpose |
@@ -112,7 +165,8 @@ select public.sync_operator_invites();  -- if the account already exists
 | `vehicle_positions` | Live position, one upserted row per vehicle |
 | `position_history` | Append-only track, written by trigger |
 | `violations` | Speeding episodes with where, when and peak speed |
-| `alerts`, `alert_receipts` | Operator messages and acknowledgements |
+| `alerts`, `alert_receipts` | Operator and system alerts, and acknowledgements |
+| `corridors`, `corridor_route_points`, `corridor_signals`, `corridor_warnings` | Green corridors: route, simulated junction states, drivers warned |
 | `operators`, `operator_invites` | Who may watch the whole fleet |
 | `settings` | Speed limit, shared by trigger and clients |
 | `retention_policy` | Prune windows, as data rather than code |
@@ -134,6 +188,7 @@ row for a vehicle speeding right now is not stale data.
 | Tiles | OpenFreeMap (OpenStreetMap data) | none |
 | Routing | OSRM | none |
 | Geocoding | Nominatim | none |
+| Traffic signals | Overpass (OpenStreetMap) | none |
 
 Routing and geocoding go through Edge Functions rather than being called
 directly, so a provider can be swapped by redeploying a function instead of
@@ -207,8 +262,8 @@ npm run apk              # gradlew assembleDebug with ninja parallelism capped
 ## Testing
 
 ```bash
-cd mobile         && npm test && npm run typecheck   # 54 tests
-cd supabase/tests && npm install && npm test         # 85 tests
+cd mobile         && npm test && npm run typecheck   # 93 tests
+cd supabase/tests && npm install && npm test         # 147 tests
 ```
 
 Schema and RLS tests run against **PGlite** — Postgres compiled to WASM, in
@@ -256,6 +311,15 @@ Things that cost real time here and are worth knowing:
   gate: login succeeded and the console rendered underneath it.
 - **A throw in the background location task kills the app**, since it runs
   outside any React error boundary.
+- **overpass-api.de answers 406 to generic library user agents** (curl,
+  okhttp), and okhttp is what React Native's `fetch` sends on Android. Always
+  send `Accept: application/json` and a real `User-Agent`. It also 406s, 504s
+  or 429s the Edge Function unpredictably, hence the phone-side retry.
+- **Android fixes a notification channel's sound on first creation.** Changing
+  the beep means a new channel id (`sutra-alerts-v1` → `-v2`).
+- **Functions in `public` are REST endpoints.** Postgres grants EXECUTE to
+  PUBLIC by default, so every SECURITY DEFINER helper needs an explicit revoke
+  (migration `000010`) unless clients are meant to call it.
 - An early commit contained a Google Maps key. It has since been revoked - the
   key now returns `REQUEST_DENIED: The provided API key is invalid` - and the
   project no longer uses Google at all. The dead string remains in history,
@@ -269,4 +333,7 @@ Things that cost real time here and are worth knowing:
   validated by tests and as a build artifact.
 - `position_history` grows at roughly 1,200–3,600 rows per vehicle-hour. The
   prune keeps 30 days.
-- Public OSRM and Nominatim endpoints carry no availability guarantee.
+- Public OSRM, Nominatim and Overpass endpoints carry no availability
+  guarantee.
+- Alerts reach only a running app; there is no push for a closed one.
+- Green-corridor signal states are simulated (see above).

@@ -25,6 +25,20 @@ import {
   subscribeToAlerts,
 } from '../src/alerts';
 import { announceAlert, prepareAlertSound } from '../src/alertSound';
+import {
+  CORRIDOR_COLOR,
+  CorridorPlan,
+  CorridorSignal,
+  endCorridor,
+  fetchSignals,
+  nextSignal,
+  planCorridor,
+  progressAlong,
+  SIGNAL_COLOR,
+  SIGNAL_LABEL,
+  startCorridor,
+  watchCorridor,
+} from '../src/corridor';
 import { MAP_STYLE_URL, ROUTE_COLOR, ROUTE_WIDTH } from '../src/mapStyle';
 import { AccentAction, Badge, Card, Chip, Field, Label, NavBar, PillButton } from '../src/ui';
 import { color, radius, shadow, space, type } from '../src/theme';
@@ -41,7 +55,7 @@ const PRESETS = [
 const NAV_ITEMS = [
   { key: 'route', glyph: '◎', label: 'Route' },
   { key: 'manual', glyph: '⌖', label: 'Manual coordinates' },
-  { key: 'alert', glyph: '✦', label: 'Emergency corridor' },
+  { key: 'alert', glyph: '✦', label: 'Green corridor' },
 ];
 
 export default function Dashboard() {
@@ -54,7 +68,13 @@ export default function Dashboard() {
   const [destLng, setDestLng] = useState('');
   const [destName, setDestName] = useState('');
   const [activePreset, setActivePreset] = useState<string | null>(null);
-  const [alerting, setAlerting] = useState(false);
+  // Green corridor, for emergency-authorized vehicles only.
+  const [corridorId, setCorridorId] = useState<string | null>(null);
+  const [corridorPlan, setCorridorPlan] = useState<CorridorPlan | null>(null);
+  const [signals, setSignals] = useState<CorridorSignal[]>([]);
+  const [corridorBusy, setCorridorBusy] = useState(false);
+  // Read by unmount cleanup, which cannot see current state.
+  const corridorRef = useRef<string | null>(null);
   const [routing, setRouting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pane, setPane] = useState('route');
@@ -165,10 +185,38 @@ export default function Dashboard() {
       active = false;
       positionWatch?.remove();
       unsubscribeAlerts?.();
+      // A corridor with nobody driving it would keep warning drivers about an
+      // ambulance that is not coming.
+      if (corridorRef.current) endCorridor(corridorRef.current).catch(() => {});
       // The foreground service must not outlive the screen that started it.
       stopTelemetry();
     };
   }, [vehicleId]);
+
+  // Follow the live corridor: signal transitions, and the database ending it
+  // on arrival.
+  useEffect(() => {
+    if (!corridorId) return;
+    let active = true;
+    fetchSignals(corridorId)
+      .then((current) => {
+        if (active) setSignals(current);
+      })
+      .catch(() => {});
+    const unwatch = watchCorridor(
+      corridorId,
+      (changed) => {
+        if (active) setSignals((current) => current.map((s) => (s.id === changed.id ? changed : s)));
+      },
+      () => {
+        if (active) closeCorridor('Arrived. Green corridor closed.');
+      },
+    );
+    return () => {
+      active = false;
+      unwatch();
+    };
+  }, [corridorId]);
 
   const applyDestination = useCallback(
     async (target: { latitude: number; longitude: number; name: string }, presetKey?: string) => {
@@ -223,12 +271,49 @@ export default function Dashboard() {
     setDestination(null);
   }
 
-  function toggleAlert() {
-    const next = !alerting;
-    setAlerting(next);
-    setAlertMessage(
-      next ? `ALERT: Emergency vehicle (${vehicle?.vehicle_number}) approaching. Yield lane.` : null,
-    );
+  function closeCorridor(note?: string) {
+    corridorRef.current = null;
+    setCorridorId(null);
+    setCorridorPlan(null);
+    setSignals([]);
+    setAlertMessage(null);
+    if (note) setError(note);
+  }
+
+  async function openCorridor() {
+    if (!vehicle || !hasDestination) return;
+    setError(null);
+    setCorridorBusy(true);
+    try {
+      const destination = { latitude: Number(destLat), longitude: Number(destLng) };
+      const plan = await planCorridor(here ?? BANGALORE, destination);
+      const id = await startCorridor(vehicle.id, destName || 'Destination', plan);
+      corridorRef.current = id;
+      setCorridorPlan(plan);
+      setCorridorId(id);
+      // Shown next to this vehicle on the operator's map.
+      setAlertMessage(`Green corridor to ${destName || 'destination'}`);
+      if (!plan.signalsAvailable) {
+        setError('Junction lookup is unavailable right now. Drivers ahead are still being warned.');
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCorridorBusy(false);
+    }
+  }
+
+  async function stopCorridor() {
+    if (!corridorId) return;
+    setCorridorBusy(true);
+    try {
+      await endCorridor(corridorId);
+      closeCorridor();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCorridorBusy(false);
+    }
   }
 
   if (loading) {
@@ -249,6 +334,8 @@ export default function Dashboard() {
   }
 
   const hasDestination = destLat !== '' && destLng !== '';
+  const progress = corridorPlan && here ? progressAlong(corridorPlan.route, here) : 0;
+  const upcoming = corridorId ? nextSignal(signals, progress) : null;
 
   return (
     <View style={styles.screen}>
@@ -291,7 +378,44 @@ export default function Dashboard() {
 
         {/* The route is the only saturated thing on the map, by design.
             GeoJSON is lon,lat — the reverse of the order used elsewhere here. */}
-        {route.length > 1 && (
+        {/* A live corridor replaces the plain route: its geometry is the one the
+            database is warning drivers along. */}
+        {corridorPlan ? (
+          <GeoJSONSource
+            id="corridor"
+            data={{
+              type: 'Feature',
+              properties: {},
+              geometry: {
+                type: 'LineString',
+                coordinates: corridorPlan.route.map(([lat, lng]) => [lng, lat]),
+              },
+            }}
+          >
+            <Layer
+              id="corridor-glow"
+              type="line"
+              layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+              paint={{ 'line-color': CORRIDOR_COLOR, 'line-width': ROUTE_WIDTH * 3, 'line-opacity': 0.25 }}
+            />
+            <Layer
+              id="corridor-line"
+              type="line"
+              layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+              paint={{ 'line-color': CORRIDOR_COLOR, 'line-width': ROUTE_WIDTH }}
+            />
+          </GeoJSONSource>
+        ) : null}
+
+        {corridorId
+          ? signals.map((signal) => (
+              <Marker key={signal.id} id={`signal-${signal.id}`} lngLat={[signal.lng, signal.lat]}>
+                <View style={[styles.signalDot, { backgroundColor: SIGNAL_COLOR[signal.state] }]} />
+              </Marker>
+            ))
+          : null}
+
+        {!corridorPlan && route.length > 1 && (
           <GeoJSONSource
             id="route"
             data={{
@@ -319,9 +443,30 @@ export default function Dashboard() {
         )}
       </Map>
 
-      {/* Alerts from traffic control. Newest first, most recent on top. */}
-      {alerts.length > 0 && (
+      {/* Alerts from traffic control, and the corridor strip when one is live. */}
+      {(alerts.length > 0 || corridorId) && (
         <View style={styles.alertStack}>
+          {corridorId ? (
+            <View style={styles.corridorStrip}>
+              <View
+                style={[
+                  styles.signalLamp,
+                  { backgroundColor: upcoming ? SIGNAL_COLOR[upcoming.signal.state] : CORRIDOR_COLOR },
+                ]}
+              />
+              <View style={styles.flex}>
+                <Text style={styles.corridorTitle}>Green corridor active</Text>
+                <Text style={styles.alertText}>
+                  {upcoming
+                    ? `Next junction ${formatDistance(upcoming.distanceM)} · ${SIGNAL_LABEL[upcoming.signal.state]}`
+                    : signals.length > 0
+                      ? 'All junctions cleared'
+                      : 'Warning drivers ahead of you'}
+                </Text>
+              </View>
+              <Text style={styles.simulated}>SIM</Text>
+            </View>
+          ) : null}
           {alerts.slice(0, 2).map((alert) => (
             <View
               key={alert.id}
@@ -492,31 +637,57 @@ export default function Dashboard() {
             <View style={styles.pane}>
               {/* Offered only when an administrator has authorized this vehicle,
                   rather than shown and then refused. */}
-              {vehicle.is_emergency_authorized ? (
-                <>
-                  <Label>Corridor broadcast</Label>
-                  <Text style={type.muted}>
-                    Tells traffic control this vehicle needs a clear path. Stays on until
-                    you cancel it.
-                  </Text>
-                  <PillButton
-                    label={
-                      alerting
-                        ? 'Cancel Clear-Path Broadcast'
-                        : 'Broadcast Emergency Clear-Path'
-                    }
-                    variant={alerting ? 'danger' : 'accent'}
-                    onPress={toggleAlert}
-                  />
-                </>
-              ) : (
+              {!vehicle.is_emergency_authorized ? (
                 <Card style={styles.locked}>
                   <Text style={type.section}>Not authorized</Text>
                   <Text style={type.muted}>
-                    Corridor broadcasts are limited to vehicles an administrator has
+                    Green corridors are limited to emergency vehicles an administrator has
                     authorized.
                   </Text>
                 </Card>
+              ) : corridorId ? (
+                <>
+                  <Label>Junctions on your route</Label>
+                  {signals.length === 0 ? (
+                    <Text style={type.muted}>No mapped signals on this route.</Text>
+                  ) : (
+                    signals.map((signal) => (
+                      <View key={signal.id} style={styles.signalRow}>
+                        <View style={[styles.signalDot, { backgroundColor: SIGNAL_COLOR[signal.state] }]} />
+                        <Text style={styles.resultName}>Junction {signal.seq}</Text>
+                        <Text style={[type.muted, styles.flex]}>
+                          {formatDistance(Math.max(0, signal.along_m - progress))}
+                        </Text>
+                        <Text style={styles.resultName}>{SIGNAL_LABEL[signal.state]}</Text>
+                      </View>
+                    ))
+                  )}
+                  <Text style={type.muted}>
+                    Drivers ahead of you on this route are alerted to give way. Signal states
+                    are simulated: SUTRA does not control traffic lights.
+                  </Text>
+                  <PillButton
+                    label="End green corridor"
+                    variant="danger"
+                    busy={corridorBusy}
+                    onPress={stopCorridor}
+                  />
+                </>
+              ) : (
+                <>
+                  <Label>Green corridor</Label>
+                  <Text style={type.muted}>
+                    {hasDestination
+                      ? `Fastest route to ${destName || 'your destination'}. Drivers ahead are alerted to give way, and the junctions on the way are shown.`
+                      : 'Set a destination in Route first.'}
+                  </Text>
+                  <PillButton
+                    label="Start green corridor"
+                    glyph="✦"
+                    busy={corridorBusy}
+                    onPress={hasDestination ? openCorridor : () => setPane('route')}
+                  />
+                </>
               )}
             </View>
           ) : null}
@@ -524,6 +695,10 @@ export default function Dashboard() {
       </BottomSheet>
     </View>
   );
+}
+
+function formatDistance(metres: number): string {
+  return metres >= 1000 ? `${(metres / 1000).toFixed(1)} km` : `${Math.round(metres)} m`;
 }
 
 const styles = StyleSheet.create({
@@ -574,6 +749,29 @@ const styles = StyleSheet.create({
     ...shadow.float,
   },
   alertCritical: { borderColor: color.danger },
+  corridorStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    backgroundColor: color.surface,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: CORRIDOR_COLOR,
+    padding: space.md,
+    ...shadow.float,
+  },
+  corridorTitle: { ...type.caption, color: CORRIDOR_COLOR },
+  signalLamp: { width: 22, height: 22, borderRadius: 11 },
+  // Always on screen while a corridor runs: the signal states are simulated.
+  simulated: { color: color.faint, fontSize: 10, fontWeight: '700', letterSpacing: 1 },
+  signalDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 2,
+    borderColor: color.canvas,
+  },
+  signalRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   alertGlyph: { fontSize: 20 },
   alertCategory: { ...type.caption, color: color.accent },
   alertText: { color: color.ink, fontSize: 13, marginTop: 2 },

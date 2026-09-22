@@ -14,6 +14,8 @@ const CATEGORY_TITLE: Record<Alert['category'], string> = {
   RULE: 'Rule warning',
   HAZARD: 'Hazard ahead',
   MESSAGE: 'Message from control',
+  // Raised by a green corridor: an ambulance is coming up this road.
+  EMERGENCY: 'Emergency vehicle approaching',
 };
 
 // Without a handler, a notification raised while the app is open is dropped

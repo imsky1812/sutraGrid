@@ -45,7 +45,7 @@ describe('isLive', () => {
 describe('CATEGORY_GLYPH', () => {
   it('covers every category the database allows', () => {
     expect(Object.keys(CATEGORY_GLYPH).sort()).toEqual(
-      ['CONGESTION', 'HAZARD', 'MESSAGE', 'RULE'],
+      ['CONGESTION', 'EMERGENCY', 'HAZARD', 'MESSAGE', 'RULE'],
     );
   });
 });

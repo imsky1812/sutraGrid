@@ -36,6 +36,18 @@ describe('notificationFor', () => {
     expect(n.title).toContain('Overspeeding');
   });
 
+  it('titles a green-corridor warning so the driver knows to give way', () => {
+    const n = notificationFor(
+      alert({
+        category: 'EMERGENCY',
+        severity: 'CRITICAL',
+        message: 'Emergency vehicle KA-01-AMB-0001 is approaching on your road. Keep left and give way.',
+      }),
+    );
+    expect(n.title).toContain('Emergency vehicle approaching');
+    expect(n.title).toContain('🚑');
+  });
+
   it('marks a critical alert as urgent', () => {
     expect(notificationFor(alert({ severity: 'CRITICAL' })).title).toContain('URGENT');
   });

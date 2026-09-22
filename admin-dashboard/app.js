@@ -851,6 +851,220 @@ async function loadViolationCount() {
   $('violation-count').textContent = `${state.violations} speeding`;
 }
 
+// ---------------------------------------------------------------------------
+// Green corridors
+//
+// The route and the drivers warned are real. The signal states are SIMULATED:
+// SUTRA does not control traffic lights, and the panel says so permanently so
+// nobody watching a demo is misled.
+// ---------------------------------------------------------------------------
+
+const CORRIDOR_COLOR = '#22C55E';
+const SIGNAL_COLOR = { WAITING: '#FF6B5A', PREEMPT: '#F5B63B', GREEN: '#22C55E', PASSED: '#6B6F65' };
+const SIGNAL_LABEL = { WAITING: 'red', PREEMPT: 'clearing', GREEN: 'green', PASSED: 'passed' };
+// PostgREST caps a response at 1,000 rows; a long route has more points.
+const PAGE = 1000;
+
+state.corridors = new Map(); // corridor id -> { corridor, route, signals, markers, warned }
+
+async function fetchRoutePoints(corridorId) {
+  const points = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from('corridor_route_points')
+      .select('lat, lng')
+      .eq('corridor_id', corridorId)
+      .order('seq')
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    points.push(...(data ?? []));
+    if (!data || data.length < PAGE) return points;
+  }
+}
+
+function paintSignal(item, signal) {
+  item.signals.set(signal.id, signal);
+  if (!state.map) return;
+  let marker = item.markers.get(signal.id);
+  if (!marker) {
+    marker = new maplibregl.Marker({ element: el('div', { className: 'signal-marker' }) })
+      .setLngLat([signal.lng, signal.lat])
+      .addTo(state.map);
+    item.markers.set(signal.id, marker);
+  }
+  const dot = marker.getElement();
+  dot.style.background = SIGNAL_COLOR[signal.state] ?? SIGNAL_COLOR.WAITING;
+  dot.title = `Junction ${signal.seq}: ${SIGNAL_LABEL[signal.state]} (simulated)`;
+}
+
+function drawCorridorRoute(item) {
+  if (!state.map || item.route.length < 2) return;
+  const src = `corridor-${item.corridor.id}`;
+  const data = {
+    type: 'Feature',
+    properties: {},
+    geometry: { type: 'LineString', coordinates: item.route.map((p) => [p.lng, p.lat]) },
+  };
+  const draw = () => {
+    if (state.map.getSource(src)) return state.map.getSource(src).setData(data);
+    state.map.addSource(src, { type: 'geojson', data });
+    state.map.addLayer({
+      id: `${src}-glow`,
+      type: 'line',
+      source: src,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': CORRIDOR_COLOR, 'line-width': 14, 'line-opacity': 0.22 },
+    });
+    state.map.addLayer({
+      id: `${src}-line`,
+      type: 'line',
+      source: src,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': CORRIDOR_COLOR, 'line-width': 5 },
+    });
+  };
+  // A corridor can arrive before the map style has finished loading.
+  if (state.map.isStyleLoaded()) draw();
+  else state.map.once('load', draw);
+}
+
+function removeCorridor(corridorId) {
+  const item = state.corridors.get(corridorId);
+  if (!item) return;
+  item.markers.forEach((m) => m.remove());
+  const src = `corridor-${corridorId}`;
+  if (state.map) {
+    for (const layer of [`${src}-line`, `${src}-glow`]) {
+      if (state.map.getLayer(layer)) state.map.removeLayer(layer);
+    }
+    if (state.map.getSource(src)) state.map.removeSource(src);
+  }
+  state.corridors.delete(corridorId);
+  renderCorridors();
+}
+
+async function loadCorridor(corridor) {
+  if (state.corridors.has(corridor.id)) return;
+  const item = { corridor, route: [], signals: new Map(), markers: new Map(), warned: new Set() };
+  state.corridors.set(corridor.id, item);
+
+  try {
+    const [route, signals, warnings] = await Promise.all([
+      fetchRoutePoints(corridor.id),
+      supabase.from('corridor_signals').select('*').eq('corridor_id', corridor.id).order('seq'),
+      supabase.from('corridor_warnings').select('vehicle_id').eq('corridor_id', corridor.id),
+    ]);
+    // Ended while this was loading.
+    if (!state.corridors.has(corridor.id)) return;
+    item.route = route;
+    (signals.data ?? []).forEach((s) => paintSignal(item, s));
+    (warnings.data ?? []).forEach((w) => item.warned.add(w.vehicle_id));
+    drawCorridorRoute(item);
+  } catch (e) {
+    logEvent('violation', 'Could not load corridor', e?.message ?? String(e));
+  }
+  renderCorridors();
+}
+
+async function loadCorridors() {
+  const { data, error } = await supabase
+    .from('corridors')
+    .select('*')
+    .eq('status', 'ACTIVE')
+    .gt('expires_at', new Date().toISOString());
+  if (error) return logEvent('violation', 'Could not load corridors', error.message);
+  await Promise.all((data ?? []).map(loadCorridor));
+}
+
+function focusCorridor(item) {
+  if (!state.map || item.route.length < 2) return;
+  const first = [item.route[0].lng, item.route[0].lat];
+  const bounds = item.route.reduce(
+    (b, p) => b.extend([p.lng, p.lat]),
+    new maplibregl.LngLatBounds(first, first),
+  );
+  state.map.fitBounds(bounds, { padding: 120, maxZoom: 16, duration: 700 });
+}
+
+function corridorName(item) {
+  const entry = state.fleet.get(item.corridor.vehicle_id);
+  return `\u{1F691} ${entry ? plate(entry) : 'Emergency vehicle'} → ${item.corridor.destination_name ?? 'destination'}`;
+}
+
+function renderCorridors() {
+  const panel = $('corridors');
+  clear(panel);
+  panel.hidden = state.corridors.size === 0;
+  if (panel.hidden) return;
+
+  panel.appendChild(
+    el('div', { className: 'corridor-head' }, [
+      el('strong', { text: `Green corridors · ${state.corridors.size}` }),
+      el('span', { className: 'sim-badge', text: 'SIMULATED: no live signal control' }),
+    ]),
+  );
+
+  state.corridors.forEach((item) => {
+    const signals = [...item.signals.values()].sort((a, b) => a.seq - b.seq);
+    const cleared = signals.filter((s) => s.state === 'PASSED').length;
+    const next = signals.find((s) => s.state !== 'PASSED');
+    const warned = item.warned.size;
+
+    const row = el('button', { className: 'corridor-row' }, [
+      el('span', { className: 'corridor-title', text: corridorName(item) }),
+      el('span', {
+        className: 'muted',
+        text: [
+          signals.length ? `${cleared}/${signals.length} junctions cleared` : 'no mapped junctions',
+          next ? `next ${SIGNAL_LABEL[next.state]}` : null,
+          `${warned} driver${warned === 1 ? '' : 's'} warned`,
+        ]
+          .filter(Boolean)
+          .join(' · '),
+      }),
+    ]);
+    row.type = 'button';
+    row.addEventListener('click', () => focusCorridor(item));
+    panel.appendChild(row);
+  });
+}
+
+function onCorridorChange(payload) {
+  const corridor = payload.new;
+  if (!corridor?.id) return;
+  if (corridor.status === 'ACTIVE') {
+    if (payload.eventType === 'INSERT') {
+      logEvent('alert', 'Green corridor opened', corridorName({ corridor }));
+    }
+    loadCorridor(corridor);
+  } else if (state.corridors.has(corridor.id)) {
+    logEvent('alert', 'Green corridor closed', corridorName(state.corridors.get(corridor.id)));
+    removeCorridor(corridor.id);
+  }
+}
+
+function onSignalChange(payload) {
+  const item = state.corridors.get(payload.new.corridor_id);
+  if (!item) return;
+  paintSignal(item, payload.new);
+  renderCorridors();
+}
+
+function onWarning(payload) {
+  const item = state.corridors.get(payload.new.corridor_id);
+  if (!item) return;
+  item.warned.add(payload.new.vehicle_id);
+  renderCorridors();
+}
+
+// Corridors lapse at expires_at without any update event, so sweep them.
+setInterval(() => {
+  const now = Date.now();
+  state.corridors.forEach((item, id) => {
+    if (new Date(item.corridor.expires_at).getTime() <= now) removeCorridor(id);
+  });
+}, 30_000);
+
 async function startConsole() {
   // The map is the most fragile part of the console: MapLibre needs WebGL, and
   // throws if the browser or GPU cannot provide it. Losing the map should not
@@ -879,6 +1093,7 @@ async function startConsole() {
 
   renderFleet();
   loadViolationCount();
+  loadCorridors();
 
   supabase.getChannels().forEach((channel) => supabase.removeChannel(channel));
 
@@ -915,6 +1130,9 @@ async function startConsole() {
         `${entry ? plate(entry) : 'Fleet'} — ${payload.new.message}`,
       );
     })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'corridors' }, onCorridorChange)
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'corridor_signals' }, onSignalChange)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'corridor_warnings' }, onWarning)
     .subscribe((status) => {
       if (status === 'SUBSCRIBED') setConnection('live', true);
       else if (status === 'CHANNEL_ERROR') setConnection('connection error', false);

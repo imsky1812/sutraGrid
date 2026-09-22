@@ -3,7 +3,7 @@ import { supabase } from './supabase';
 export type Alert = {
   id: number;
   vehicle_id: string | null;
-  category: 'CONGESTION' | 'RULE' | 'HAZARD' | 'MESSAGE';
+  category: 'CONGESTION' | 'RULE' | 'HAZARD' | 'MESSAGE' | 'EMERGENCY';
   severity: 'INFO' | 'WARNING' | 'CRITICAL';
   message: string;
   created_at: string;
@@ -15,6 +15,7 @@ export const CATEGORY_GLYPH: Record<Alert['category'], string> = {
   RULE: '⚠️',
   HAZARD: '⛔',
   MESSAGE: '💬',
+  EMERGENCY: '🚑',
 };
 
 /**
