@@ -24,6 +24,7 @@ import {
   fetchActiveAlerts,
   subscribeToAlerts,
 } from '../src/alerts';
+import { announceAlert, prepareAlertSound } from '../src/alertSound';
 import { MAP_STYLE_URL, ROUTE_COLOR, ROUTE_WIDTH } from '../src/mapStyle';
 import { AccentAction, Badge, Card, Chip, Field, Label, NavBar, PillButton } from '../src/ui';
 import { color, radius, shadow, space, type } from '../src/theme';
@@ -103,9 +104,15 @@ export default function Dashboard() {
         unsubscribeAlerts = subscribeToAlerts(found.id, (alert) => {
           if (!active) return;
           setAlerts((current) => [alert, ...current.filter((a) => a.id !== alert.id)]);
+          // Only new alerts beep. Ones already in force at launch were
+          // fetched above and are shown quietly.
+          void announceAlert(alert);
           acknowledgeAlert(alert.id, found.id).catch(() => {});
         });
 
+        // Before telemetry, so the notification prompt comes up while the
+        // driver is still looking at the screen rather than mid-drive.
+        await prepareAlertSound();
         await startTelemetry(found);
       } catch (e) {
         if (active) {

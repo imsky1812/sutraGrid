@@ -104,6 +104,15 @@ const config: ExpoConfig = {
           'SUTRA shares your location with traffic control while you are on duty.',
       },
     ],
+    [
+      'expo-notifications',
+      {
+        color: '#D7F94A',
+        // Bundled as a raw resource so the alert channel can use it. Regenerate
+        // with scripts/generate-beep.mjs.
+        sounds: ['./assets/sounds/alert_beep.wav'],
+      },
+    ],
   ],
 };
 
