@@ -112,6 +112,13 @@ describe('describeViolation', () => {
     expect(describeViolation(long).detail).toMatch(/for 3 min$/);
   });
 
+  it('says how hard the braking was, and which road was driven the wrong way', () => {
+    const brake = violation({ kind: 'HARSH_BRAKE', detail: { from_kmh: 60, to_kmh: 25, seconds: 2 } });
+    expect(describeViolation(brake).detail).toBe('From 60 to 25 km/h in 2s');
+    const wrong = violation({ kind: 'WRONG_WAY', speed: 30, detail: { road: 'MG Road' } });
+    expect(describeViolation(wrong).detail).toBe('Against one-way MG Road at 30 km/h');
+  });
+
   it('describes the other kinds without talking about a limit', () => {
     expect(describeViolation(violation({ kind: 'HARSH_BRAKE', speed: 62 })).title).toBe('Harsh braking');
     expect(describeViolation(violation({ kind: 'WRONG_WAY' })).title).toBe('Wrong way');

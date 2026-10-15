@@ -28,6 +28,8 @@ export type Violation = {
   lng: number;
   occurred_at: string;
   cleared_at: string | null;
+  /** What a speed and a limit cannot say: how hard, which road. */
+  detail?: { from_kmh?: number; to_kmh?: number; seconds?: number; road?: string } | null;
 };
 
 export const HISTORY_DAYS = 7;
@@ -45,7 +47,7 @@ export async function fetchViolations(vehicleId: string, days = HISTORY_DAYS): P
   const since = new Date(Date.now() - days * 86_400_000).toISOString();
   const { data, error } = await supabase
     .from('violations')
-    .select('kind, speed, speed_limit, lat, lng, occurred_at, cleared_at')
+    .select('kind, speed, speed_limit, lat, lng, occurred_at, cleared_at, detail')
     .eq('vehicle_id', vehicleId)
     .gte('occurred_at', since)
     .order('occurred_at', { ascending: false })
@@ -74,15 +76,19 @@ export function formatDuration(minutes: number): string {
 /** What happened, in the words a driver would use. */
 export function describeViolation(v: Violation): { title: string; detail: string } {
   if (v.kind === 'HARSH_BRAKE') {
+    const d = v.detail ?? {};
     return {
       title: 'Harsh braking',
-      detail: `Braked hard from ${Math.round(v.speed)} km/h`,
+      detail:
+        d.to_kmh !== undefined
+          ? `From ${d.from_kmh} to ${d.to_kmh} km/h in ${d.seconds}s`
+          : `Braked hard from ${Math.round(v.speed)} km/h`,
     };
   }
   if (v.kind === 'WRONG_WAY') {
     return {
       title: 'Wrong way',
-      detail: `Against a one-way road at ${Math.round(v.speed)} km/h`,
+      detail: `Against one-way ${v.detail?.road ?? 'road'} at ${Math.round(v.speed)} km/h`,
     };
   }
 

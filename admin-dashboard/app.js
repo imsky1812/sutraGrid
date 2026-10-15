@@ -554,19 +554,45 @@ function drawerShell(title) {
 }
 
 function describeViolation(v) {
+  const started = new Date(v.occurred_at);
+  const when = started.toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  const where = `${Number(v.lat).toFixed(4)}, ${Number(v.lng).toFixed(4)}`;
+  const peak = `${Number(v.speed).toFixed(0)} km/h`;
+
+  if (v.kind === 'HARSH_BRAKE') {
+    const d = v.detail ?? {};
+    return {
+      when,
+      where,
+      peak,
+      headline: 'Harsh braking',
+      why: d.from_kmh !== undefined
+        ? `${d.from_kmh} to ${d.to_kmh} km/h in ${d.seconds}s (${d.decel_mps2} m/s²)`
+        : `Braked hard from ${peak}`,
+    };
+  }
+
+  if (v.kind === 'WRONG_WAY') {
+    return {
+      when,
+      where,
+      peak,
+      headline: 'Wrong way',
+      why: `Against one-way ${v.detail?.road ?? 'road'} at ${peak}`,
+    };
+  }
+
   const over = Number(v.speed) - Number(v.speed_limit);
   const ended = v.cleared_at ? new Date(v.cleared_at) : null;
-  const started = new Date(v.occurred_at);
   const seconds = ended ? Math.max(1, Math.round((ended - started) / 1000)) : null;
-
   return {
-    when: started.toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }),
+    when,
+    where,
+    peak,
+    headline: `Speeding · peak ${peak}`,
     // "Why" in the only sense the data supports: by how much, and for how long.
     why: `${over.toFixed(0)} km/h over the ${Number(v.speed_limit).toFixed(0)} limit` +
       (seconds ? ` for ${seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)} min`}` : ', still open'),
-    where: `${Number(v.lat).toFixed(4)}, ${Number(v.lng).toFixed(4)}`,
-    peak: `${Number(v.speed).toFixed(0)} km/h`,
-    headline: `Peak ${Number(v.speed).toFixed(0)} km/h`,
   };
 }
 
@@ -582,7 +608,7 @@ async function openInsights(vehicleId) {
     supabase.rpc('vehicle_trips', { p_vehicle_id: vehicleId, p_days: HISTORY_DAYS }),
     supabase
       .from('violations')
-      .select('kind, speed, speed_limit, lat, lng, occurred_at, cleared_at')
+      .select('kind, speed, speed_limit, lat, lng, occurred_at, cleared_at, detail')
       .eq('vehicle_id', vehicleId)
       .gte('occurred_at', since)
       .order('occurred_at', { ascending: false }),
@@ -1347,7 +1373,7 @@ async function startReplay(vehicleId, trip) {
       fetchTripPoints(vehicleId, trip.started_at, trip.ended_at),
       supabase
         .from('violations')
-        .select('kind, speed, speed_limit, lat, lng, occurred_at, cleared_at')
+        .select('kind, speed, speed_limit, lat, lng, occurred_at, cleared_at, detail')
         .eq('vehicle_id', vehicleId)
         .gte('occurred_at', trip.started_at)
         .lte('occurred_at', trip.ended_at)
@@ -1657,11 +1683,8 @@ function subscribeToFleet() {
       state.violations += 1;
       $('violation-count').textContent = `${state.violations} speeding`;
       const entry = state.fleet.get(payload.new.vehicle_id);
-      logEvent(
-        'violation',
-        'Speed violation',
-        `${entry ? plate(entry) : payload.new.vehicle_id} peaked at ${Number(payload.new.speed).toFixed(0)} km/h`,
-      );
+      const d = describeViolation(payload.new);
+      logEvent('violation', d.headline, `${entry ? plate(entry) : 'Vehicle'} · ${d.why}`);
     })
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'alerts' }, (payload) => {
       const entry = payload.new.vehicle_id ? state.fleet.get(payload.new.vehicle_id) : null;
