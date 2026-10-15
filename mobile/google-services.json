@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "572644204799",
+    "project_id": "sutragrid",
+    "storage_bucket": "sutragrid.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:572644204799:android:fccec862a39c688dac2cca",
+        "android_client_info": {
+          "package_name": "com.sutra.vehicle"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC3CelP-HQ8uu1WhYmm4U2Dpxrp_XYgOqs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
