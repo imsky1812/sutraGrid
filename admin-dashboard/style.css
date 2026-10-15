@@ -381,3 +381,6 @@ textarea.field-sm { resize: vertical; min-height: 76px; }
   width: 14px; height: 14px; border-radius: 50%;
   background: var(--danger); border: 2px solid var(--on-accent); cursor: help;
 }
+
+/* What a corridor asked the city's signal controller. */
+.corridor-command { font-size: 11px; color: var(--muted); font-family: ui-monospace, Consolas, monospace; }

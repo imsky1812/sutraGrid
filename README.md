@@ -437,6 +437,32 @@ imported roads are simply not checked.
 Every one of these checks runs inside the phone's position update, so each
 logs and lets the position through if it ever fails.
 
+## Speed limits by place
+
+`speed_limit_at()` gives the limit where a vehicle is, in order: a zone with a
+limit (the strictest, where zones overlap), the limit posted on the road it is
+on (`road_segments.maxspeed_kmh`), a default for that kind of road from
+`road_class_limits`, then the global `speed_limit_kmh` setting. The road it is
+on is the nearest imported segment running the way it is travelling, so a
+service lane is not held to the highway beside it. `road_class_limits` starts
+empty on purpose: limits are set by state notification and vary by vehicle
+class, so an operator fills in what applies:
+
+```sql
+insert into public.road_class_limits (highway, limit_kmh, note)
+values ('residential', 30, 'State notification, 2024');
+```
+
+## Signal adapter
+
+The interface for connecting a city's traffic-signal controller is
+[`docs/signal-adapter.md`](docs/signal-adapter.md). Every junction change on a
+corridor is recorded in `signal_commands` as the request SUTRA would make;
+in the default `simulation` mode nothing is sent. `tools/mock-signal-adapter.mjs`
+is a reference implementation of the city's side. Corridors whose vehicle has
+been silent for two minutes, or that are past their hour, are ended every
+minute by `end_stale_corridors()`, which releases any junction still held.
+
 ## Zones and events
 
 Operators draw zones on the console's map (school, hospital, restricted,

@@ -309,7 +309,7 @@
         <div><span>Latest APK</span><code>sutra-vehicle-oct16.apk</code><br><small class="mono">EAS build 03b8dfac · 16 Oct 2026</small></div>
         <div><span>Supabase project</span><code>ytqpjxpzhgintwpbujcy</code></div>
         <div><span>EAS project</span><code>@imsky1812s-org/sutra-vehicle</code></div>
-        <div><span>Edge Functions</span><code>directions · geocode · corridor · nearby · notify</code></div>
+        <div><span>Edge Functions</span><code>directions · geocode · corridor · nearby · notify · signal-dispatch</code></div>
       </div>
     </section>
 
@@ -361,6 +361,8 @@ flowchart LR
         <li><time>16 Oct</time><div><b>Zones and one record of events</b><p>Operators draw zones on the map; entering or leaving one is recorded, and a zone can send the driver a message on the way in, such as a school-zone warning. Every check now writes into a single events table, which the console's log reads live.</p></div></li>
         <li><time>16 Oct</time><div><b>Email confirmation fixed</b><p>Confirmation emails linked to localhost:3000, a dead page on a phone. Both sign-up paths now land on a real confirmation page on the console, and the project's Site URL and redirect allow-list point there; a new sign-up on 16 October confirmed through it.</p></div></li>
         <li><time>16 Oct</time><div><b>Tools run for real</b><p>The road importer loaded 2,337 roads around the test phones, surviving an outage of the main Overpass server by splitting the area into tiles, trying four servers and saving as it goes. A two-minute simulator run then exercised the live system: speeding caught and alerted, a genuine collision warning between two simulated cars crossing a junction, and the school-zone message on entry, with no false harsh-braking or wrong-way flags. Running it found two bugs, both fixed: its clean-up had silently deleted nothing, and its hold-ups braked hard enough to count as harsh braking. Step-by-step instructions and the recorded run are in <code>tools/README.md</code>.</p></div></li>
+        <li><time>16 Oct</time><div><b>Speed limits by place</b><p>Speeding is now measured against the limit where the vehicle is: a zone's limit (such as a school zone), the limit posted on the road it is on, a default per kind of road an authority can set, or the global 80. Alerts say which road or zone. Rehearsed on a real road: 60 km/h on a 40 road, which the old single limit would have let through.</p></div></li>
+        <li><time>16 Oct</time><div><b>The signal-adapter interface</b><p>Every junction change on a green corridor is now logged as the request SUTRA would send a city's signal controller, shown in the console. A written contract (<code>docs/signal-adapter.md</code>), a dispatch function that stays off until an authority connects a controller, and a reference city-side adapter, tested against each other. Building it found that a corridor whose phone died was never ended; a job now ends those after two minutes of silence.</p></div></li>
         <li><time>22 Sep</time><div><b>Alerts, green corridor, layout</b><p>Beeping alerts and automatic overspeed warnings. The green corridor end to end. Internal database functions locked down. Keyboard and screen-edge alignment fixed across the app. This record added to the repository as <code>docs/project-record.html</code>, kept up to date with every change.</p></div></li>
       </ol>
     </section>
@@ -385,7 +387,8 @@ flowchart LR
         <li>A week of trips per vehicle, each replayable on the map at 1×, 10× or 60× with violations pinned where they happened, plus a heatmap of where speeding happens across the fleet.</li>
         <li>Send alerts to one vehicle or broadcast to all, with category and severity.</li>
         <li>Active green corridors with junction states and drivers warned.</li>
-        <li><b>Zones:</b> draw school, hospital, restricted or depot areas on the map. Crossings are recorded, and a zone can send drivers a message on entry.</li>
+        <li><b>Zones:</b> draw school, hospital, restricted or depot areas on the map, each with an optional speed limit. Crossings are recorded, and a zone can send drivers a message on entry.</li>
+        <li><b>Signal requests:</b> beside each green corridor, what SUTRA asked (or in simulation would ask) the city's signal controller, and the answer.</li>
         <li><b>Live event log</b> fed from one events table: zone crossings, speeding, harsh braking, wrong way, collision warnings, corridors.</li>
         <li><b>Vehicles screen:</b> grant or revoke emergency authorization and set the vehicle type for any registered vehicle. Operators only; every change is recorded against the operator who made it.</li>
       </ul>
@@ -455,6 +458,8 @@ flowchart LR
             <tr><td><code>events</code></td><td>Everything that happens to a vehicle, one row each, in a fixed set of kinds</td></tr>
             <tr><td><code>zones</code>, <code>zone_presence</code></td><td>Areas drawn by operators, and which vehicles are inside them</td></tr>
             <tr><td><code>road_segments</code></td><td>OpenStreetMap roads: direction of travel, one-way, posted limits</td></tr>
+            <tr><td><code>road_class_limits</code></td><td>Default limit per kind of road, set by an authority; empty until it is</td></tr>
+            <tr><td><code>signal_commands</code></td><td>Every request made of a city's signal controller, and its answer</td></tr>
             <tr><td><code>conflict_warnings</code>, <code>wrong_way_streaks</code></td><td>Bookkeeping that keeps each warning to once</td></tr>
             <tr><td><i>no table</i> — <code>nearby_vehicles()</code></td><td>What a driver may learn about vehicles around them: position, speed, heading and type, under an opaque per-caller reference</td></tr>
             <tr><td><code>settings</code>, <code>retention_policy</code></td><td>Speed limit (80 km/h); prune windows</td></tr>

@@ -271,8 +271,8 @@
   <tr><td>8</td><td>Richer violation types</td><td><span class="tag done">Done · 16 Oct</span></td></tr>
   <tr><td>9</td><td>Geofencing + event engine</td><td><span class="tag done">Done · 16 Oct</span></td></tr>
   <tr><td>10</td><td>PostGIS spatial queries</td><td><span class="tag med">Medium</span></td></tr>
-  <tr><td>11</td><td>Per-road speed limits</td><td><span class="tag low">Low</span></td></tr>
-  <tr><td>12</td><td>Signal-adapter interface</td><td><span class="tag low">Low — pitch value</span></td></tr>
+  <tr><td>11</td><td>Per-road speed limits</td><td><span class="tag done">Done · 16 Oct</span></td></tr>
+  <tr><td>12</td><td>Signal-adapter interface</td><td><span class="tag done">Done · 16 Oct</span></td></tr>
   <tr><td>13</td><td>Offline buffering</td><td><span class="tag low">Low</span></td></tr>
 </table>
 
@@ -685,8 +685,18 @@
   <div class="phase-head">
     <span class="phase-no">PHASE 11</span>
     <h3>Per-road speed limits</h3>
-    <span class="tag low">Low</span>
+    <span class="tag done">Done · 16 Oct</span>
   </div>
+  <p><strong>Shipped and live.</strong> The limit at a vehicle's position now
+    comes from, in order: a zone an operator gave a limit (a school zone at 25);
+    the limit posted on the road it is on; a default for that kind of road, in a
+    table left deliberately empty because Indian limits are set by state
+    notification and vary by vehicle class; and the global 80 as before. "The
+    road it is on" uses the same direction test as wrong-way, so a service lane
+    is not held to the highway beside it. Rehearsed on an imported road:
+    <em>"Overspeeding: 60 km/h on Crossings Republik Road, where the limit is 40
+    km/h"</em> — a speed the old single limit would never have flagged. The
+    console's zone editor takes a limit. 15 tests.</p>
   <p>
     A speed-zone table seeded from OpenStreetMap <code>maxspeed</code>, replacing
     one global 80&nbsp;km/h, falling back to the global value where no zone is
@@ -698,7 +708,25 @@
   <div class="phase-head">
     <span class="phase-no">PHASE 12</span>
     <h3>Signal-adapter interface</h3>
-    <span class="tag low">Low effort — highest pitch value</span>
+    <span class="tag done">Done · 16 Oct</span>
+  </div>
+  <p><strong>Shipped and live, switched off.</strong> Every junction change on
+    a corridor is logged as the request SUTRA would send a city's controller —
+    <code>PREEMPT</code> with an arrival estimate, <code>HOLD_GREEN</code>,
+    <code>RELEASE</code> — shown on the console beside the corridor. The written
+    contract is <code>docs/signal-adapter.md</code>: signed HTTPS requests, the
+    city may refuse any of them, and every request carries a maximum hold the
+    controller must enforce on its own. A dispatch function (deployed, inert
+    until an authority sets an endpoint and switches the mode) and a reference
+    city-side adapter are tested against each other over real HTTP, signature
+    included. Rehearsed live: the real ambulance's junction got PREEMPT (45 s
+    away), HOLD_GREEN, and RELEASE when the corridor ended early.</p>
+  <div class="callout warn">
+    <p><strong>Found while building it:</strong> nothing ever ended a corridor
+      whose phone died. It stayed active indefinitely, its junctions were never
+      released, and the nightly prune never removed it. A job now ends any
+      corridor past its hour or whose vehicle has been silent for two
+      minutes — a junction must not stay held because a battery ran out.</p>
   </div>
   <p>
     The single most useful item for an authority pitch, because it turns

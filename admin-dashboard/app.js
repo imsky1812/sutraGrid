@@ -1003,20 +1003,34 @@ function removeCorridor(corridorId) {
 
 async function loadCorridor(corridor) {
   if (state.corridors.has(corridor.id)) return;
-  const item = { corridor, route: [], signals: new Map(), markers: new Map(), warned: new Set() };
+  const item = {
+    corridor,
+    route: [],
+    signals: new Map(),
+    markers: new Map(),
+    warned: new Set(),
+    // What SUTRA asked (or, in simulation, would have asked) the city.
+    commands: [],
+  };
   state.corridors.set(corridor.id, item);
 
   try {
-    const [route, signals, warnings] = await Promise.all([
+    const [route, signals, warnings, commands] = await Promise.all([
       fetchRoutePoints(corridor.id),
       supabase.from('corridor_signals').select('*').eq('corridor_id', corridor.id).order('seq'),
       supabase.from('corridor_warnings').select('vehicle_id').eq('corridor_id', corridor.id),
+      supabase
+        .from('signal_commands')
+        .select('id, command, osm_id, eta_s, status, response')
+        .eq('corridor_id', corridor.id)
+        .order('id'),
     ]);
     // Ended while this was loading.
     if (!state.corridors.has(corridor.id)) return;
     item.route = route;
     (signals.data ?? []).forEach((s) => paintSignal(item, s));
     (warnings.data ?? []).forEach((w) => item.warned.add(w.vehicle_id));
+    item.commands = commands.data ?? [];
     drawCorridorRoute(item);
   } catch (e) {
     logEvent('violation', 'Could not load corridor', e?.message ?? String(e));
@@ -1081,10 +1095,38 @@ function renderCorridors() {
           .join(' · '),
       }),
     ]);
+    // The request side of the signal-adapter contract: what this corridor
+    // asks a city's controller. SIMULATED means recorded, not sent.
+    const last = item.commands[item.commands.length - 1];
+    if (last) {
+      row.appendChild(
+        el('span', {
+          className: 'corridor-command',
+          text:
+            `City asked: ${COMMAND_LABEL[last.command] ?? last.command} junction ${last.osm_id}` +
+            (last.eta_s != null ? ` (${last.eta_s}s away)` : '') +
+            ` · ${last.status}` +
+            (last.response?.reason ? ` · ${last.response.reason}` : '') +
+            ` · ${item.commands.length} request${item.commands.length === 1 ? '' : 's'}`,
+        }),
+      );
+    }
+
     row.type = 'button';
     row.addEventListener('click', () => focusCorridor(item));
     panel.appendChild(row);
   });
+}
+
+const COMMAND_LABEL = { PREEMPT: 'pre-empt', HOLD_GREEN: 'hold green', RELEASE: 'release' };
+
+function onSignalCommand(payload) {
+  const item = state.corridors.get(payload.new.corridor_id);
+  if (!item) return;
+  const i = item.commands.findIndex((c) => c.id === payload.new.id);
+  if (i >= 0) item.commands[i] = payload.new;
+  else item.commands.push(payload.new);
+  renderCorridors();
 }
 
 function onCorridorChange(payload) {
@@ -2104,6 +2146,7 @@ function subscribeToFleet() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'corridors' }, onCorridorChange)
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'corridor_signals' }, onSignalChange)
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'corridor_warnings' }, onWarning)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'signal_commands' }, onSignalCommand)
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'events' }, (payload) =>
       logFleetEvent(payload.new),
     )
