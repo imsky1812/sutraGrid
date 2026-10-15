@@ -360,6 +360,7 @@ flowchart LR
         <li><time>16 Oct</time><div><b>Harsh braking and wrong-way driving</b><p>Two new violation kinds. Harsh braking is recorded but never announced. Wrong-way driving uses OpenStreetMap one-way data loaded by a road importer, needs three fixes in a row, and ignores the opposite carriageway of a divided road; the driver gets an urgent alert naming the road. Two assumptions in the speeding code that only held while it was the only kind were fixed first.</p></div></li>
         <li><time>16 Oct</time><div><b>Zones and one record of events</b><p>Operators draw zones on the map; entering or leaving one is recorded, and a zone can send the driver a message on the way in, such as a school-zone warning. Every check now writes into a single events table, which the console's log reads live.</p></div></li>
         <li><time>16 Oct</time><div><b>Email confirmation fixed</b><p>Confirmation emails linked to localhost:3000, a dead page on a phone. Both sign-up paths now land on a real confirmation page on the console.</p></div></li>
+        <li><time>16 Oct</time><div><b>Tools run for real</b><p>The road importer loaded 2,337 roads around the test phones, surviving an outage of the main Overpass server by splitting the area into tiles, trying four servers and saving as it goes. A two-minute simulator run then exercised the live system: speeding caught and alerted, a genuine collision warning between two simulated cars crossing a junction, and the school-zone message on entry, with no false harsh-braking or wrong-way flags. Running it found two bugs, both fixed: its clean-up had silently deleted nothing, and its hold-ups braked hard enough to count as harsh braking. Step-by-step instructions and the recorded run are in <code>tools/README.md</code>.</p></div></li>
         <li><time>22 Sep</time><div><b>Alerts, green corridor, layout</b><p>Beeping alerts and automatic overspeed warnings. The green corridor end to end. Internal database functions locked down. Keyboard and screen-edge alignment fixed across the app. This record added to the repository as <code>docs/project-record.html</code>, kept up to date with every change.</p></div></li>
       </ol>
     </section>
@@ -469,7 +470,7 @@ flowchart LR
           <thead><tr><th>Suite</th><th>Count</th><th>Runs on</th></tr></thead>
           <tbody>
             <tr><td>App: screens, alerts, corridor, telemetry</td><td class="num">184 passing</td><td>Jest</td></tr>
-            <tr><td>Database rules and triggers, Edge Function handlers</td><td class="num">326 passing</td><td>PGlite (Postgres in WASM), no Docker</td></tr>
+            <tr><td>Database rules and triggers, Edge Function handlers</td><td class="num">334 passing</td><td>PGlite (Postgres in WASM), no Docker</td></tr>
           </tbody>
         </table>
       </div>
@@ -509,7 +510,7 @@ flowchart LR
         <li>Add <code>https://sutra-control.expo.app</code> to Supabase → Authentication → URL Configuration → Redirect URLs, so password-reset emails return to the console.</li>
         <li>To try a corridor, open <b>Vehicles</b> in the console, set the type to AMBULANCE and press <b>Authorize</b>, then start a shift in that vehicle. Seeing a driver get warned needs a second phone on the route.</li>
         <li><b>Fix email confirmation for good:</b> in Supabase → Authentication → URL Configuration, set the Site URL to <code>https://sutra-control.expo.app/confirmed.html</code> and add <code>https://sutra-control.expo.app/**</code> to the redirect URLs.</li>
-        <li><b>Import roads</b> for each area you operate in, so wrong-way checks cover it: <code>node tools/import-roads.mjs --near lat,lng --radius 3000</code>.</li>
+        <li><b>Import roads</b> for any further area you operate in (the test phones' area is done): <code>node import-roads.mjs --near lat,lng --radius 3000</code> from <code>tools/</code>. See <code>tools/README.md</code>.</li>
         <li><b>Test push:</b> install the latest APK on both phones and start a shift on each, then swipe SUTRA away on one and send it an alert from the console. It should still beep.</li>
         <li>Optional: enable leaked-password protection in Supabase Auth (flagged by the security advisor).</li>
       </ul>

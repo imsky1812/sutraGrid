@@ -314,7 +314,7 @@ npm run apk              # gradlew assembleDebug with ninja parallelism capped
 
 ```bash
 cd mobile         && npm test && npm run typecheck   # 184 tests
-cd supabase/tests && npm install && npm test         # 326 tests
+cd supabase/tests && npm install && npm test         # 334 tests
 ```
 
 Schema and RLS tests run against **PGlite** — Postgres compiled to WASM, in
@@ -365,12 +365,16 @@ wall.
 
 ## A simulated fleet
 
+Step-by-step instructions, every option, and a recorded test run are in
+[`tools/README.md`](tools/README.md).
+
 `tools/` runs vehicles that behave like phones, so the system can be shown
 without one device per vehicle:
 
 ```bash
 cd tools && npm install
-SUTRA_EMAIL=you@example.com SUTRA_PASSWORD=... node simulate.mjs --count 5 --speeder
+copy .env.example .env    # then put your login in tools/.env
+node simulate.mjs --count 5 --speeder --for 120
 ```
 
 They centre on wherever your own vehicle last reported, so simulated traffic
@@ -382,8 +386,11 @@ Nothing here is a shortcut: each one registers a real vehicle and upserts
 through the same client the app uses, so the triggers, violations, corridor
 warnings and the surroundings view all see it - none of them can tell the
 difference, and row-level security applies exactly as it would to a driver.
-Plates all begin `SIM `, and Ctrl-C deletes them. `--cleanup` removes
-leftovers from an interrupted run.
+Plates all begin `SIM `. `--for` stops and removes them by itself; otherwise
+Ctrl-C does. `--cleanup` removes leftovers from an interrupted run. Removal goes
+through `remove_simulated_vehicles()`, which lets an operator delete only their
+own simulated vehicles: vehicles have no delete policy, because deleting one
+would erase its violations.
 
 ## Trips and replay
 
@@ -418,7 +425,7 @@ Wrong way needs to know which roads are one-way. Load OpenStreetMap roads for
 each area you operate in:
 
 ```bash
-cd tools && SUTRA_EMAIL=ops@example.com SUTRA_PASSWORD=...   node import-roads.mjs --near 28.6241,77.4356 --radius 3000
+cd tools && node import-roads.mjs --near 28.6241,77.4356 --radius 3000
 ```
 
 It runs from a laptop because the public Overpass servers refuse Supabase's

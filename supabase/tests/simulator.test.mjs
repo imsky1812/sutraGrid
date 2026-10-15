@@ -12,6 +12,7 @@ import {
   createDriver,
   distanceM,
   measure,
+  MAX_DECEL,
   nextSpeed,
   pickDestination,
   plateFor,
@@ -78,8 +79,23 @@ describe('speed', () => {
     assert.ok(seen.size > 5, 'speed never varied');
   });
 
-  test('crawls occasionally, as though for a junction', () => {
-    assert.ok(nextSpeed(40, 40, () => 0.01) < 5);
+  // Found running it against the live project: dropping to a crawl in one
+  // step is 4.75 m/s², and the harsh-braking check flagged 4 of 5 cars.
+  test('never brakes harder than an ordinary driver', () => {
+    let speed = 100;
+    for (let i = 0; i < 300; i++) {
+      const next = nextSpeed(speed, 100, Math.random, 2);
+      const decel = (speed - next) / 3.6 / 2;
+      assert.ok(decel <= MAX_DECEL + 1e-9, `${decel.toFixed(2)} m/s² from ${speed}`);
+      speed = next;
+    }
+  });
+
+  test('still slows to a crawl for a hold-up, just over several seconds', () => {
+    let speed = 40;
+    for (let i = 0; i < 6; i++) speed = nextSpeed(speed, 40, () => 0.01, 2);
+    assert.ok(speed < 5, `${speed}`);
+    assert.ok(nextSpeed(40, 40, () => 0.01, 2) >= 40 - MAX_DECEL * 3.6 * 2 - 1e-9);
   });
 
   test('a stopped vehicle gets going again', () => {

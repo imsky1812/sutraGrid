@@ -65,17 +65,32 @@ export function positionAlong(route, along, metres) {
   };
 }
 
+/** Ordinary braking and acceleration, in m/s². Harder braking is a violation. */
+export const MAX_DECEL = 2.5;
+export const MAX_ACCEL = 1.5;
+
 /**
  * Traffic does not move at a constant speed, and a constant one makes a demo
  * look fake. This wanders around the target without ever going backwards, and
- * dips toward a crawl now and then as though for a junction.
+ * now and then slows toward a crawl as though for a junction.
+ *
+ * It changes speed only as fast as an ordinary driver would. An earlier
+ * version dropped to a crawl in a single step - 38 to 4 km/h in two seconds -
+ * and the harsh-braking check rightly flagged four of five simulated cars in
+ * their first minute.
  */
-export function nextSpeed(current, target, random = Math.random) {
+export function nextSpeed(current, target, random = Math.random, seconds = 2) {
   const roll = random();
-  // Roughly one update in twenty-five is a hold-up.
-  if (roll < 0.04) return Math.max(0, target * 0.1);
-  const drift = (roll - 0.5) * target * 0.25;
-  return Math.min(target * 1.15, Math.max(0, current * 0.7 + (target + drift) * 0.3));
+  let wanted;
+  // Roughly one update in twenty-five begins a hold-up.
+  if (roll < 0.04) wanted = Math.max(0, target * 0.1);
+  else {
+    const drift = (roll - 0.5) * target * 0.25;
+    wanted = Math.min(target * 1.15, Math.max(0, current * 0.7 + (target + drift) * 0.3));
+  }
+  const maxDrop = MAX_DECEL * 3.6 * seconds;
+  const maxRise = MAX_ACCEL * 3.6 * seconds;
+  return Math.max(0, Math.min(current + maxRise, Math.max(current - maxDrop, wanted)));
 }
 
 /** A point to drive to: somewhere in a ring around the centre, not on top of it. */
@@ -118,7 +133,7 @@ export function createDriver({ id, plate, targetKmh, random = Math.random }) {
     advance(elapsedSeconds) {
       if (!route) return null;
 
-      speed = nextSpeed(speed, targetKmh, random);
+      speed = nextSpeed(speed, targetKmh, random, elapsedSeconds);
       travelled += (speed / 3.6) * elapsedSeconds;
       const { point, heading, done } = positionAlong(route, along, travelled);
       if (done) route = null;

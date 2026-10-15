@@ -12,6 +12,7 @@
  *
  *   node tools/simulate.mjs --count 5
  *   node tools/simulate.mjs --near 28.6139,77.2090 --count 8 --speeder
+ *   node tools/simulate.mjs --count 5 --for 120   (stops and cleans up by itself)
  *   node tools/simulate.mjs --cleanup
  *
  * Credentials come from the environment:
@@ -56,6 +57,19 @@ function config() {
   }
 }
 
+/** Remove this account's simulated vehicles. Throws, rather than pretending. */
+async function removeSimulated(supabase) {
+  const { data, error } = await supabase.rpc('remove_simulated_vehicles');
+  if (error) {
+    throw new Error(
+      /operator/i.test(error.message)
+        ? 'Only an operator account can remove simulated vehicles.'
+        : `Could not remove simulated vehicles: ${error.message}.`,
+    );
+  }
+  return Number(data ?? 0);
+}
+
 async function routeBetween(from, to) {
   const url =
     `${ROUTER}/route/v1/driving/${from[1]},${from[0]};${to[1]},${to[0]}` +
@@ -83,16 +97,12 @@ async function main() {
   const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
   if (authError) throw new Error(`Sign-in failed: ${authError.message}`);
 
-  // Leftovers from an interrupted run, or an explicit clean-up.
-  const { data: existing } = await supabase
-    .from('vehicles')
-    .select('id, vehicle_number')
-    .like('vehicle_number', `${SIM_PLATE_PREFIX}%`);
-
-  if (existing?.length) {
-    await supabase.from('vehicles').delete().in('id', existing.map((v) => v.id));
-    console.log(`Removed ${existing.length} vehicle(s) from a previous run.`);
-  }
+  // Leftovers from an interrupted run, or an explicit clean-up. Vehicles have
+  // no delete policy - a driver must not be able to erase their own record -
+  // so this goes through a function that only removes an operator's own
+  // simulated vehicles. A plain delete here used to match nothing, silently.
+  const leftover = await removeSimulated(supabase);
+  if (leftover > 0) console.log(`Removed ${leftover} vehicle(s) from a previous run.`);
   if (hasFlag('cleanup')) return;
 
   const count = Math.min(Math.max(Number(argOf('count', 4)), 1), 20);
@@ -153,8 +163,14 @@ async function main() {
     if (stopping) return;
     stopping = true;
     console.log('\nRemoving simulated vehicles…');
-    await supabase.from('vehicles').delete().in('id', drivers.map((d) => d.id));
-    process.exit(0);
+    try {
+      const n = await removeSimulated(supabase);
+      console.log(`Removed ${n}.`);
+      process.exit(0);
+    } catch (e) {
+      console.error(`${e.message} Run again with --cleanup.`);
+      process.exit(1);
+    }
   };
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
@@ -196,6 +212,14 @@ async function main() {
 
   await tick();
   setInterval(tick, TICK_MS);
+
+  // A fixed run that removes its own vehicles: needed wherever Ctrl-C cannot
+  // be sent, such as a scheduled demo or a script on Windows.
+  const seconds = Number(argOf('for', 0));
+  if (seconds > 0) {
+    console.log(`Stopping by itself after ${seconds}s.`);
+    setTimeout(cleanup, seconds * 1000);
+  }
 }
 
 main().catch((e) => {

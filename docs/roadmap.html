@@ -437,10 +437,15 @@
     like a demo. Ctrl-C deletes the vehicles; <code>--cleanup</code> clears
     leftovers.
   </p>
-  <p><strong>Shipped:</strong> <code>tools/simulator.mjs</code> (the arithmetic,
-    16 tests), <code>tools/simulate.mjs</code> (the runner). Not yet run against
-    the live project — it signs in as a real account, so that is the owner's to
-    do.</p>
+  <p><strong>Shipped and run live (16 Oct):</strong> a two-minute run with five
+    cars produced a speeding alert, a real collision warning between two of them
+    at a junction, and a school-zone message, with no false harsh-braking or
+    wrong-way flags. Running it for real found two bugs, both fixed: clean-up
+    silently deleted nothing (vehicles have no delete policy, by design), so
+    removal now goes through an operator-only function for simulated vehicles;
+    and hold-ups braked hard enough to count as harsh braking, so speed now
+    changes no faster than an ordinary driver. Instructions and the recorded
+    run: <code>tools/README.md</code>.</p>
 </div>
 
 <div class="phase">
@@ -609,11 +614,11 @@
       gets an URGENT alert naming the road. Around the test phones the
       importer found 1,774 roads and 9,298 segments.</li>
   </ul>
-  <div class="callout warn">
-    <p><strong>Needs you:</strong> wrong-way checks only cover areas whose
-      roads have been imported. Run the importer once for each area you
-      operate in.</p>
-  </div>
+  <p><strong>Roads loaded (16 Oct):</strong> 2,337 roads around the test
+    phones. The first real run met an outage of the main Overpass server (502
+    on its own status page), so the importer now tiles large areas, tries four
+    servers, retries refused tiles and saves as it goes. Further areas need the
+    importer run once each.</p>
   <ul>
     <li><strong>Harsh braking</strong> — deceleration against the previous
       stored position, with the threshold as data rather than code.</li>
