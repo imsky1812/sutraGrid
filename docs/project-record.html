@@ -334,7 +334,8 @@ flowchart LR
             <tr><td>Driver app</td><td>Expo / React Native, MapLibre map, background location, notifications</td><td>Android APK built on EAS</td></tr>
             <tr><td>Operator console</td><td>Plain HTML/JS with MapLibre GL and Supabase JS</td><td>EAS Hosting</td></tr>
             <tr><td>Database</td><td>10 migrations: tables, RLS, triggers, retention, pg_cron</td><td>Supabase</td></tr>
-            <tr><td>Edge Functions</td><td><code>directions</code> (OSRM), <code>geocode</code> (Nominatim), <code>corridor</code> (OSRM + Overpass)</td><td>Supabase, JWT required</td></tr>
+            <tr><td>Edge Functions</td><td><code>directions</code> (OSRM), <code>geocode</code> (Nominatim), <code>corridor</code> and <code>nearby</code> (OSRM + Overpass)</td><td>Supabase, JWT required</td></tr>
+            <tr><td>Fleet simulator</td><td>Vehicles that report like phones, for demonstrating without one device each</td><td><code>tools/</code>, run on a laptop</td></tr>
           </tbody>
         </table>
       </div>
@@ -351,6 +352,7 @@ flowchart LR
         <li><time>15 Oct</time><div><b>Authorizing vehicles from the console</b><p>Emergency authorization is now granted in the console instead of the SQL editor: a Vehicles screen listing every registered vehicle, a checked function behind it, and an audit record of who granted what. APK rebuilt, since Expo artifacts expire after 14 days.</p></div></li>
         <li><time>15 Oct</time><div><b>Emergency destinations, and a roadmap</b><p>The hospital, fire and police chips were fixed coordinates in Bengaluru, so tapping one in Delhi drew a 2,000 km route. They now look up the real nearest service around the driver through a new <code>nearby</code> Edge Function, with a retry from the phone because the public Overpass and Nominatim servers refuse the Edge runtime. Routing and corridors no longer fall back to a guessed city centre: without a location they refuse. The remaining backlog was planned as fourteen phases in <code>docs/roadmap.html</code> and <code>docs/SUTRA-roadmap.pdf</code>.</p></div></li>
         <li><time>15 Oct</time><div><b>Live surroundings view</b><p>A driver-centred radar: the driver at the centre, the SUTRA vehicles around them placed by distance and by how many degrees off the nose, carried forward between position updates so they move smoothly. A Radar / Map toggle swaps it for the same vehicles drawn on the map. Realtime could not do this - a driver may read only their own position row - so the database answers through a checked function that returns kinematics with an opaque reference and no plate, driver name or vehicle id.</p></div></li>
+        <li><time>15 Oct</time><div><b>A simulated fleet</b><p>Vehicles that behave like phones, so the system can be demonstrated without one device per vehicle. Each registers a real vehicle and reports through the same client the app uses, so triggers, violations, corridor warnings and the radar all treat them as ordinary traffic, and row-level security applies as it would to any driver. One can be made to speed, which is the quickest way to show an automatic alert arriving.</p></div></li>
         <li><time>22 Sep</time><div><b>Alerts, green corridor, layout</b><p>Beeping alerts and automatic overspeed warnings. The green corridor end to end. Internal database functions locked down. Keyboard and screen-edge alignment fixed across the app. This record added to the repository as <code>docs/project-record.html</code>, kept up to date with every change.</p></div></li>
       </ol>
     </section>
@@ -448,7 +450,7 @@ flowchart LR
           <thead><tr><th>Suite</th><th>Count</th><th>Runs on</th></tr></thead>
           <tbody>
             <tr><td>App: screens, alerts, corridor, telemetry</td><td class="num">157 passing</td><td>Jest</td></tr>
-            <tr><td>Database rules and triggers, Edge Function handlers</td><td class="num">188 passing</td><td>PGlite (Postgres in WASM), no Docker</td></tr>
+            <tr><td>Database rules and triggers, Edge Function handlers</td><td class="num">204 passing</td><td>PGlite (Postgres in WASM), no Docker</td></tr>
           </tbody>
         </table>
       </div>

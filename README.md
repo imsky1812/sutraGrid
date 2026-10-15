@@ -267,7 +267,7 @@ npm run apk              # gradlew assembleDebug with ninja parallelism capped
 
 ```bash
 cd mobile         && npm test && npm run typecheck   # 157 tests
-cd supabase/tests && npm install && npm test         # 188 tests
+cd supabase/tests && npm install && npm test         # 204 tests
 ```
 
 Schema and RLS tests run against **PGlite** — Postgres compiled to WASM, in
@@ -315,6 +315,28 @@ Positions arrive every one to three seconds. Each vehicle is carried forward
 along its own heading and speed in between, and stops being guessed after six
 seconds, because a car that braked or turned would otherwise sail on through a
 wall.
+
+## A simulated fleet
+
+`tools/` runs vehicles that behave like phones, so the system can be shown
+without one device per vehicle:
+
+```bash
+cd tools && npm install
+SUTRA_EMAIL=you@example.com SUTRA_PASSWORD=... node simulate.mjs --count 5 --speeder
+```
+
+They centre on wherever your own vehicle last reported, so simulated traffic
+appears around the real phone. Pass `--near lat,lng` to put them somewhere
+else, and `--speeder` to make one exceed the limit, which is the quickest way
+to see an automatic violation alert arrive on a real device.
+
+Nothing here is a shortcut: each one registers a real vehicle and upserts
+through the same client the app uses, so the triggers, violations, corridor
+warnings and the surroundings view all see it - none of them can tell the
+difference, and row-level security applies exactly as it would to a driver.
+Plates all begin `SIM `, and Ctrl-C deletes them. `--cleanup` removes
+leftovers from an interrupted run.
 
 ## Roadmap
 

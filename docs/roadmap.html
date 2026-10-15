@@ -263,7 +263,7 @@
   <tr><td>0</td><td>Emergency destinations that are actually nearby</td><td><span class="tag done">Done · 15 Oct</span></td></tr>
   <tr><td>1</td><td>Shared geometry: bearing, projection, relative position</td><td><span class="tag done">Done · 15 Oct</span></td></tr>
   <tr><td>2</td><td>Live surroundings view — radar + map toggle</td><td><span class="tag done">Done · 15 Oct</span></td></tr>
-  <tr><td>3</td><td>Vehicle simulator</td><td><span class="tag med">Medium</span></td></tr>
+  <tr><td>3</td><td>Vehicle simulator</td><td><span class="tag done">Done · 15 Oct</span></td></tr>
   <tr><td>4</td><td>Real-device demo run</td><td><span class="tag high">High</span></td></tr>
   <tr><td>5</td><td>Push to a closed app (FCM)</td><td><span class="tag high">High</span></td></tr>
   <tr><td>6</td><td>Trip replay + violations view</td><td><span class="tag high">High</span></td></tr>
@@ -415,7 +415,7 @@
   <div class="phase-head">
     <span class="phase-no">PHASE 3</span>
     <h3>Vehicle simulator</h3>
-    <span class="tag med">Medium — moved up</span>
+    <span class="tag done">Done · 15 Oct</span>
   </div>
   <p>
     Ranked Medium in the source document, but Phase&nbsp;2 cannot be
@@ -423,12 +423,24 @@
     one phone. Nothing like it exists in the repository today.
   </p>
   <p>
-    A script that signs in as a few seeded drivers, routes each along a real
-    OSRM path and posts positions at the real cadence. It goes through the
-    ordinary client path, so the triggers, violations, corridor warnings and the
-    radar all exercise production code. One of them can be made to speed, to
-    show the beep.
+    A script that signs in, registers vehicles plated <code>SIM 0001</code>
+    onward and drives each along a real OSRM route, upserting positions through
+    the same client the app uses. The triggers, violations, corridor warnings
+    and the radar therefore exercise production code — none of them can tell
+    the difference — and row-level security applies exactly as it would to a
+    driver. <code>--speeder</code> makes one exceed the limit, which is the
+    fastest way to see an automatic violation alert land on a real phone.
   </p>
+  <p>
+    Speed wanders rather than holding constant, and dips toward a crawl now and
+    then: a fleet moving at exactly 38 km/h is the thing that makes a demo look
+    like a demo. Ctrl-C deletes the vehicles; <code>--cleanup</code> clears
+    leftovers.
+  </p>
+  <p><strong>Shipped:</strong> <code>tools/simulator.mjs</code> (the arithmetic,
+    16 tests), <code>tools/simulate.mjs</code> (the runner). Not yet run against
+    the live project — it signs in as a real account, so that is the owner's to
+    do.</p>
 </div>
 
 <div class="phase">

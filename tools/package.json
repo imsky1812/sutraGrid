@@ -1,0 +1,12 @@
+{
+  "name": "sutra-tools",
+  "private": true,
+  "type": "module",
+  "description": "A simulated fleet, so the system can be shown without a phone per vehicle.",
+  "scripts": {
+    "simulate": "node simulate.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.112.3"
+  }
+}
