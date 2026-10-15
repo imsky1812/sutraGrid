@@ -103,6 +103,11 @@ describe('summarize', () => {
 });
 
 describe('describeViolation', () => {
+  it('says which road or zone set the limit', () => {
+    const v = violation({ speed: 60, speed_limit: 40, detail: { place: 'Crossings Republik Road' } });
+    expect(describeViolation(v).detail).toBe('20 km/h over the 40 limit on Crossings Republik Road for 40s');
+  });
+
   it('says when speeding is still going on', () => {
     expect(describeViolation(violation({ cleared_at: null })).detail).toMatch(/still going/);
   });

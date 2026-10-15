@@ -598,6 +598,7 @@ function describeViolation(v) {
     headline: `Speeding · peak ${peak}`,
     // "Why" in the only sense the data supports: by how much, and for how long.
     why: `${over.toFixed(0)} km/h over the ${Number(v.speed_limit).toFixed(0)} limit` +
+      (v.detail?.place ? ` (${v.detail.place})` : '') +
       (seconds ? ` for ${seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)} min`}` : ', still open'),
   };
 }
@@ -1593,7 +1594,9 @@ function describeEvent(e) {
     case 'ZONE_EXIT':
       return `${d.zone ?? 'Zone'}${d.minutes_inside !== undefined ? ` after ${d.minutes_inside} min` : ''}`;
     case 'OVERSPEED':
-      return `${d.speed} km/h in a ${d.limit} km/h zone`;
+      return d.place
+        ? `${d.speed} km/h where the limit is ${d.limit} (${d.place})`
+        : `${d.speed} km/h in a ${d.limit} km/h zone`;
     case 'HARSH_BRAKE':
       return d.from_kmh !== undefined ? `${d.from_kmh} to ${d.to_kmh} km/h in ${d.seconds}s` : 'Braked hard';
     case 'WRONG_WAY':
@@ -1644,12 +1647,14 @@ async function loadRecentEvents() {
 // alert, also arrives by push when their app is closed.
 // ---------------------------------------------------------------------------
 
+// Suggested limits are only a starting point for the form; the operator sets
+// the real figure, which is what the database enforces.
 const ZONE_KINDS = {
-  SCHOOL: { label: 'School', color: '#F5B63B', message: 'School zone: slow down, children crossing.' },
-  HOSPITAL: { label: 'Hospital', color: '#22C55E', message: 'Hospital zone: slow down and do not use the horn.' },
-  RESTRICTED: { label: 'Restricted', color: '#FF6B5A', message: 'Restricted area: authorised vehicles only.' },
-  DEPOT: { label: 'Depot', color: '#7BA7FF', message: '' },
-  CUSTOM: { label: 'Other', color: '#D7F94A', message: '' },
+  SCHOOL: { label: 'School', color: '#F5B63B', limit: 25, message: 'School zone: slow down, children crossing.' },
+  HOSPITAL: { label: 'Hospital', color: '#22C55E', limit: 30, message: 'Hospital zone: slow down and do not use the horn.' },
+  RESTRICTED: { label: 'Restricted', color: '#FF6B5A', limit: null, message: 'Restricted area: authorised vehicles only.' },
+  DEPOT: { label: 'Depot', color: '#7BA7FF', limit: null, message: '' },
+  CUSTOM: { label: 'Other', color: '#D7F94A', limit: null, message: '' },
 };
 
 state.zones = [];
@@ -1701,7 +1706,7 @@ function drawZones() {
 async function loadZones() {
   const { data, error } = await supabase
     .from('zones')
-    .select('id, name, kind, polygon, alert_message, active')
+    .select('id, name, kind, polygon, alert_message, active, speed_limit_kmh')
     .order('created_at', { ascending: false });
   if (error) {
     logEvent('violation', 'Could not load zones', error.message);
@@ -1832,8 +1837,17 @@ function describeDraft(points) {
   message.rows = 3;
   message.maxLength = 200;
   message.value = ZONE_KINDS.SCHOOL.message;
+
+  const limit = el('input', { className: 'field' });
+  limit.type = 'number';
+  limit.min = '5';
+  limit.max = '200';
+  limit.placeholder = 'No special limit';
+  limit.value = String(ZONE_KINDS.SCHOOL.limit);
+
   kind.addEventListener('change', () => {
     message.value = ZONE_KINDS[kind.value].message;
+    limit.value = ZONE_KINDS[kind.value].limit ?? '';
   });
 
   const status = el('small', { className: 'error' });
@@ -1846,12 +1860,19 @@ function describeDraft(points) {
       status.hidden = false;
       return;
     }
+    const limitKmh = limit.value.trim() ? Number(limit.value) : null;
+    if (limitKmh !== null && !(limitKmh >= 5 && limitKmh <= 200)) {
+      status.textContent = 'A speed limit must be between 5 and 200 km/h, or left empty.';
+      status.hidden = false;
+      return;
+    }
     save.disabled = true;
     const { error } = await supabase.from('zones').insert({
       name: name.value.trim(),
       kind: kind.value,
       polygon: points,
       alert_message: message.value.trim() || null,
+      speed_limit_kmh: limitKmh,
     });
     if (error) {
       status.textContent = error.message;
@@ -1869,6 +1890,8 @@ function describeDraft(points) {
   drawer.appendChild(name);
   drawer.appendChild(el('label', { className: 'label', text: 'Kind' }));
   drawer.appendChild(kind);
+  drawer.appendChild(el('label', { className: 'label', text: 'Speed limit inside, km/h (optional)' }));
+  drawer.appendChild(limit);
   drawer.appendChild(el('label', { className: 'label', text: 'Told to a driver on entering (optional)' }));
   drawer.appendChild(message);
   drawer.appendChild(
@@ -1908,6 +1931,7 @@ function openZones() {
         el('span', { className: z.active ? 'tag granted' : 'tag', text: ZONE_KINDS[z.kind]?.label ?? z.kind }),
       ]),
     );
+    if (z.speed_limit_kmh) row.appendChild(el('small', { className: 'muted', text: `Limit ${z.speed_limit_kmh} km/h inside` }));
     if (z.alert_message) row.appendChild(el('small', { className: 'muted', text: `“${z.alert_message}”` }));
 
     const toggle = el('button', { className: 'btn', text: z.active ? 'Switch off' : 'Switch on' });

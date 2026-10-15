@@ -29,7 +29,14 @@ export type Violation = {
   occurred_at: string;
   cleared_at: string | null;
   /** What a speed and a limit cannot say: how hard, which road. */
-  detail?: { from_kmh?: number; to_kmh?: number; seconds?: number; road?: string } | null;
+  detail?: {
+    from_kmh?: number;
+    to_kmh?: number;
+    seconds?: number;
+    road?: string;
+    /** For speeding: where the limit came from, e.g. a road or a school zone. */
+    place?: string | null;
+  } | null;
 };
 
 export const HISTORY_DAYS = 7;
@@ -100,6 +107,7 @@ export function describeViolation(v: Violation): { title: string; detail: string
     title: `Speeding · peak ${Math.round(v.speed)} km/h`,
     detail:
       `${over} km/h over the ${Math.round(v.speed_limit)} limit` +
+      (v.detail?.place ? ` on ${v.detail.place}` : '') +
       (seconds === null ? ', still going' : ` for ${seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)} min`}`),
   };
 }
