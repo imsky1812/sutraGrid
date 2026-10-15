@@ -2,6 +2,7 @@ import { PermissionsAndroid, Platform } from 'react-native';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import { supabase } from './supabase';
+import { bufferPosition, flushIfDue, shouldBuffer } from './offlineBuffer';
 import type { Vehicle } from './vehicles';
 
 export const TELEMETRY_TASK = 'sutra-telemetry';
@@ -93,10 +94,17 @@ async function pushPosition(loc: Coords): Promise<void> {
     .upsert(row, { onConflict: 'vehicle_id' });
 
   if (error) {
-    // Dropping the frame is correct: the next one is a second or three away,
-    // and retrying would queue stale positions ahead of fresh ones.
+    // Never retried as a live position: the next one is a second or three
+    // away, and replaying old fixes as live ones would move the vehicle
+    // backwards on the map. But a fix lost to a dead zone is kept, and sent
+    // later as history, so the track has no hole in it.
+    if (shouldBuffer(error)) await bufferPosition(row);
     console.warn('[telemetry] upsert rejected:', error.message);
+    return;
   }
+
+  // Back online: send anything kept while there was no signal.
+  void flushIfDue(row.vehicle_id);
 }
 
 // Defined at module scope so the background runtime can find it. Registering it
