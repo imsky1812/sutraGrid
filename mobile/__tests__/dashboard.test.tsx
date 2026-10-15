@@ -51,6 +51,8 @@ jest.mock('../src/vehicles', () => ({
 }));
 
 jest.mock('../src/telemetry', () => ({
+  // The cadence is a pure function of the vehicle; the real one is the point.
+  cadenceFor: jest.requireActual('../src/telemetry').cadenceFor,
   startTelemetry: (...a: unknown[]) => mockStartTelemetry(...a),
   stopTelemetry: (...a: unknown[]) => mockStopTelemetry(...a),
   setDestination: (...a: unknown[]) => mockSetDestination(...a),
@@ -75,6 +77,25 @@ const NEAREST_HOSPITAL = {
   latitude: 12.976,
   longitude: 77.601,
   distanceMeters: 640,
+};
+
+const mockWatchSurroundings = jest.fn();
+
+jest.mock('../src/surroundings', () => ({
+  ...jest.requireActual('../src/surroundings'),
+  watchSurroundings: (...a: unknown[]) => mockWatchSurroundings(...a),
+}));
+
+const NEIGHBOUR = {
+  ref: 'abc123',
+  lat: 12.9716,
+  lng: 77.5946,
+  speed: 36,
+  heading: 0,
+  vehicle_type: 'AMBULANCE',
+  is_emergency: true,
+  warned: false,
+  seenAt: Date.now(),
 };
 
 const mockPlanCorridor = jest.fn();
@@ -112,7 +133,16 @@ describe('Dashboard', () => {
     mockFetchRoute.mockResolvedValue([]);
     mockListMyVehicles.mockResolvedValue([vehicle()]);
     mockFindNearestServices.mockResolvedValue([NEAREST_HOSPITAL]);
+    mockWatchSurroundings.mockImplementation((_id, _cadence, onChange) => {
+      onChange([NEIGHBOUR]);
+      return () => {};
+    });
   });
+
+  const openAroundPane = async () => {
+    await waitFor(() => expect(screen.getByLabelText('Around me')).toBeTruthy());
+    fireEvent.press(screen.getByLabelText('Around me'));
+  };
 
   /** Tap the hospital chip and wait for it to become the real nearest one. */
   const chooseNearestHospital = async () => {
@@ -203,6 +233,56 @@ describe('Dashboard', () => {
       fireEvent.press(screen.getByText('Nearest police'));
       await waitFor(() => expect(screen.getByText(/Could not look up/i)).toBeTruthy());
       expect(mockFetchRoute).not.toHaveBeenCalled();
+    });
+  });
+
+  // The connected-vehicle answer to Tesla's camera view: the SUTRA vehicles
+  // around the driver, polled because RLS makes a subscription return only the
+  // driver's own row.
+  describe('around me', () => {
+    it('watches the surroundings only while the pane is open', async () => {
+      await render(<Dashboard />);
+      await waitFor(() => expect(screen.getByLabelText('Route')).toBeTruthy());
+      expect(mockWatchSurroundings).not.toHaveBeenCalled();
+
+      await openAroundPane();
+      await waitFor(() =>
+        expect(mockWatchSurroundings).toHaveBeenCalledWith('veh-1', 3000, expect.any(Function), expect.any(Function)),
+      );
+    });
+
+    it('polls at the emergency cadence for an authorized vehicle', async () => {
+      mockListMyVehicles.mockResolvedValue([vehicle({ is_emergency_authorized: true })]);
+      await render(<Dashboard />);
+      await openAroundPane();
+      await waitFor(() =>
+        expect(mockWatchSurroundings).toHaveBeenCalledWith('veh-1', 1000, expect.any(Function), expect.any(Function)),
+      );
+    });
+
+    it('draws what it found on the radar', async () => {
+      await render(<Dashboard />);
+      await openAroundPane();
+      await waitFor(() => expect(screen.getByTestId('radar')).toBeTruthy());
+      expect(screen.getByTestId(`radar-vehicle-${NEIGHBOUR.ref}`)).toBeTruthy();
+    });
+
+    it('swaps the radar for map markers', async () => {
+      await render(<Dashboard />);
+      await openAroundPane();
+      await waitFor(() => expect(screen.getByText('Map')).toBeTruthy());
+      fireEvent.press(screen.getByText('Map'));
+
+      await waitFor(() => expect(screen.queryByTestId('radar')).toBeNull());
+      expect(screen.getByTestId(`map-vehicle-${NEIGHBOUR.ref}`)).toBeTruthy();
+    });
+
+    // A jury will ask what this can and cannot see. The answer belongs on the
+    // screen, like the corridor's SIM badge.
+    it('states that it only sees SUTRA vehicles', async () => {
+      await render(<Dashboard />);
+      await openAroundPane();
+      await waitFor(() => expect(screen.getByText(/Only vehicles running SUTRA/i)).toBeTruthy());
     });
   });
 

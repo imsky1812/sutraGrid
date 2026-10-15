@@ -14,7 +14,13 @@ import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { listMyVehicles, Vehicle } from '../src/vehicles';
-import { setAlertMessage, setDestination, startTelemetry, stopTelemetry } from '../src/telemetry';
+import {
+  cadenceFor,
+  setAlertMessage,
+  setDestination,
+  startTelemetry,
+  stopTelemetry,
+} from '../src/telemetry';
 import { fetchRoute } from '../src/directions';
 import {
   describePoint,
@@ -47,6 +53,14 @@ import {
   watchCorridor,
 } from '../src/corridor';
 import { MAP_STYLE_URL, ROUTE_COLOR, ROUTE_WIDTH } from '../src/mapStyle';
+import { describeNeighbour, EMERGENCY_COLOR, Radar } from '../src/Radar';
+import {
+  RADIUS_M,
+  reckon,
+  TrackedNeighbour,
+  watchSurroundings,
+} from '../src/surroundings';
+import { headingFrom, type Point } from '../src/geo';
 import { AccentAction, Badge, Card, Chip, Field, Label, NavBar, PillButton } from '../src/ui';
 import { color, radius, shadow, space, type } from '../src/theme';
 import type { LatLng } from '../src/polyline';
@@ -69,7 +83,11 @@ const NAV_ITEMS = [
   { key: 'route', glyph: '◎', label: 'Route' },
   { key: 'manual', glyph: '⌖', label: 'Manual coordinates' },
   { key: 'alert', glyph: '✦', label: 'Green corridor' },
+  { key: 'around', glyph: '◉', label: 'Around me' },
 ];
+
+/** How often the radar redraws between position updates, in ms. */
+const RADAR_FRAME_MS = 60;
 
 export default function Dashboard() {
   const { vehicleId } = useLocalSearchParams<{ vehicleId: string }>();
@@ -102,6 +120,13 @@ export default function Dashboard() {
   // hardcoded city centre, which was giving routes from the wrong place.
   const [here, setHere] = useState<{ latitude: number; longitude: number } | null>(null);
   const [follow, setFollow] = useState(true);
+  // Live surroundings. `heading` is derived rather than read straight from the
+  // sensor, which reports 0 whenever the phone is still.
+  const [neighbours, setNeighbours] = useState<TrackedNeighbour[]>([]);
+  const [myHeading, setMyHeading] = useState(0);
+  const [radarMode, setRadarMode] = useState<'radar' | 'map'>('radar');
+  const [frame, setFrame] = useState(() => Date.now());
+  const lastFix = useRef<Point | null>(null);
   const [query, setQuery] = useState('');
   const [places, setPlaces] = useState<Place[]>([]);
   const [searching, setSearching] = useState(false);
@@ -208,14 +233,26 @@ export default function Dashboard() {
           accuracy: Location.Accuracy.Balanced,
         });
         if (!active) return;
+        lastFix.current = [first.coords.latitude, first.coords.longitude];
         setHere({ latitude: first.coords.latitude, longitude: first.coords.longitude });
 
         const sub = await Location.watchPositionAsync(
           { accuracy: Location.Accuracy.Balanced, timeInterval: 4000, distanceInterval: 10 },
           (loc) => {
-            if (active) {
-              setHere({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
-            }
+            if (!active) return;
+            const point: Point = [loc.coords.latitude, loc.coords.longitude];
+            // The radar rotates to this, so a wrong value spins the whole view.
+            setMyHeading((last) =>
+              headingFrom(
+                loc.coords.heading,
+                Math.max(0, (loc.coords.speed ?? 0) * 3.6),
+                lastFix.current,
+                point,
+                last,
+              ),
+            );
+            lastFix.current = point;
+            setHere({ latitude: point[0], longitude: point[1] });
           },
         );
         positionWatch = sub;
@@ -262,6 +299,34 @@ export default function Dashboard() {
       unwatch();
     };
   }, [corridorId]);
+
+  // Poll the vehicles around this one, but only while the driver is looking at
+  // them. It is a request every second or two, and nothing else on the screen
+  // uses the answer.
+  useEffect(() => {
+    if (pane !== 'around' || !vehicle) return;
+
+    const stop = watchSurroundings(
+      vehicle.id,
+      cadenceFor(vehicle.is_emergency_authorized),
+      setNeighbours,
+      // A dropped request on a moving phone is ordinary, and the loop keeps
+      // going, so this must not clear the screen or shout.
+      (message) => setLocationError(message),
+    );
+    return () => {
+      stop();
+      setNeighbours([]);
+    };
+  }, [pane, vehicle]);
+
+  // The clock the radar is drawn against. Positions arrive every one to three
+  // seconds; this is what carries the icons smoothly in between.
+  useEffect(() => {
+    if (pane !== 'around' || radarMode !== 'radar') return;
+    const timer = setInterval(() => setFrame(Date.now()), RADAR_FRAME_MS);
+    return () => clearInterval(timer);
+  }, [pane, radarMode]);
 
   const applyDestination = useCallback(
     async (target: { latitude: number; longitude: number; name: string }, presetKey?: string) => {
@@ -513,6 +578,25 @@ export default function Dashboard() {
             />
           </GeoJSONSource>
         )}
+
+        {pane === 'around' && radarMode === 'map'
+          ? neighbours.map((n) => {
+              const [lat, lng] = reckon(n, frame);
+              return (
+                <Marker key={n.ref} id={`near-${n.ref}`} lngLat={[lng, lat]}>
+                  <View
+                    testID={`map-vehicle-${n.ref}`}
+                    style={[
+                      styles.nearDot,
+                      n.is_emergency && { backgroundColor: EMERGENCY_COLOR },
+                      n.warned && styles.nearWarned,
+                      { transform: [{ rotate: `${n.heading}deg` }] },
+                    ]}
+                  />
+                </Marker>
+              );
+            })
+          : null}
 
         {hasDestination && (
           <Marker id="destination" lngLat={[Number(destLng), Number(destLat)]}>
@@ -795,6 +879,65 @@ export default function Dashboard() {
               )}
             </View>
           ) : null}
+
+          {pane === 'around' ? (
+            <View style={styles.pane}>
+              <View style={styles.row}>
+                <Chip
+                  glyph="◉"
+                  label="Radar"
+                  selected={radarMode === 'radar'}
+                  onPress={() => setRadarMode('radar')}
+                />
+                <Chip
+                  glyph="⌗"
+                  label="Map"
+                  selected={radarMode === 'map'}
+                  onPress={() => setRadarMode('map')}
+                />
+              </View>
+
+              {radarMode === 'radar' ? (
+                <Radar
+                  here={here ? [here.latitude, here.longitude] : null}
+                  heading={myHeading}
+                  neighbours={neighbours}
+                  rangeM={RADIUS_M}
+                  now={frame}
+                  size={240}
+                />
+              ) : (
+                <Text style={type.muted}>
+                  {neighbours.length > 0
+                    ? 'Shown on the map behind this panel, pointing the way they are facing.'
+                    : 'Nothing to show on the map yet.'}
+                </Text>
+              )}
+
+              {here
+                ? neighbours
+                    .slice(0, 4)
+                    .map((n) => (
+                      <View key={n.ref} style={styles.result}>
+                        <Text style={styles.resultName}>
+                          {n.is_emergency ? `${n.vehicle_type} · ` : ''}
+                          {describeNeighbour([here.latitude, here.longitude], myHeading, n, frame)}
+                          {n.warned ? ' · giving way' : ''}
+                        </Text>
+                      </View>
+                    ))
+                : null}
+
+              {/* The same honesty the corridor's SIM badge carries. A jury will
+                  ask what this can and cannot see, and the answer belongs on
+                  the screen rather than in a pitch deck. */}
+              <Text style={type.muted}>
+                Only vehicles running SUTRA appear here. Other traffic, pedestrians and
+                lane positions need sensors on the vehicle, which a phone does not have.
+                An empty view means nobody nearby is sharing, not that the road is clear.
+              </Text>
+            </View>
+          ) : null}
         </BottomSheetScrollView>
       </BottomSheet>
     </View>
@@ -810,6 +953,15 @@ function formatDistance(metres: number): string {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: color.canvas },
+  nearDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 4,
+    backgroundColor: color.muted,
+    borderWidth: 1,
+    borderColor: color.canvas,
+  },
+  nearWarned: { borderWidth: 2, borderColor: color.accent },
   centre: { alignItems: 'center', justifyContent: 'center' },
   flex: { flex: 1 },
 
