@@ -219,3 +219,15 @@ test('nothing here is callable by a client', async () => {
            has_function_privilege('anon', 'public.setting_num(text, double precision)', 'execute') as setting`);
   assert.deepEqual(rows[0], { detect: false, setting: false });
 });
+
+// It runs inside every phone's position update. If it ever breaks, tracking
+// must carry on regardless.
+test('a failure in the check never blocks a position', async () => {
+  const db = await setup();
+  // Sabotage a setting so the check throws a cast error.
+  await db.query(`update public.settings set value = '"not a number"' where key = 'conflict_miss_m'`);
+  await report(db, A, at(-40, 0), 36, 0);
+  await report(db, B, at(0, -40), 36, 90);
+  const { rows } = await db.query(`select count(*)::int as n from public.vehicle_positions`);
+  assert.equal(rows[0].n, 2);
+});

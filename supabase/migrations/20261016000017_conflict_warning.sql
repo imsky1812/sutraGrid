@@ -106,10 +106,12 @@ security definer
 set search_path = ''
 as $$
 declare
-  horizon   double precision := public.setting_num('conflict_horizon_s', 6);
-  miss_max  double precision := public.setting_num('conflict_miss_m', 12);
-  min_speed double precision := public.setting_num('conflict_min_speed_kmh', 8);
-  cooldown  double precision := public.setting_num('conflict_cooldown_s', 30);
+  -- Read in the body, not here: an error while declaring escapes the
+  -- exception handler below, and this must never block a position.
+  horizon   double precision;
+  miss_max  double precision;
+  min_speed double precision;
+  cooldown  double precision;
   -- Search far enough to catch two vehicles at 60 km/h each, six seconds out.
   reach     double precision := 250;
   pad_lat   double precision;
@@ -130,6 +132,11 @@ declare
   b         uuid;
   claimed   integer;
 begin
+  horizon   := public.setting_num('conflict_horizon_s', 6);
+  miss_max  := public.setting_num('conflict_miss_m', 12);
+  min_speed := public.setting_num('conflict_min_speed_kmh', 8);
+  cooldown  := public.setting_num('conflict_cooldown_s', 30);
+
   -- A parked or crawling vehicle: nothing to project. If someone is heading
   -- for it, their own frame does the work.
   if new.speed < min_speed then
@@ -219,6 +226,11 @@ begin
        now() + interval '1 minute');
   end loop;
 
+  return new;
+exception when others then
+  -- This runs inside every phone's position update. A bug here must never
+  -- cost a vehicle its tracking, so it logs and lets the position through.
+  raise warning 'conflict check failed for %: %', new.vehicle_id, sqlerrm;
   return new;
 end;
 $$;
