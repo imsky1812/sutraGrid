@@ -363,6 +363,7 @@ flowchart LR
         <li><time>16 Oct</time><div><b>Tools run for real</b><p>The road importer loaded 2,337 roads around the test phones, surviving an outage of the main Overpass server by splitting the area into tiles, trying four servers and saving as it goes. A two-minute simulator run then exercised the live system: speeding caught and alerted, a genuine collision warning between two simulated cars crossing a junction, and the school-zone message on entry, with no false harsh-braking or wrong-way flags. Running it found two bugs, both fixed: its clean-up had silently deleted nothing, and its hold-ups braked hard enough to count as harsh braking. Step-by-step instructions and the recorded run are in <code>tools/README.md</code>.</p></div></li>
         <li><time>16 Oct</time><div><b>Speed limits by place</b><p>Speeding is now measured against the limit where the vehicle is: a zone's limit (such as a school zone), the limit posted on the road it is on, a default per kind of road an authority can set, or the global 80. Alerts say which road or zone. Rehearsed on a real road: 60 km/h on a 40 road, which the old single limit would have let through.</p></div></li>
         <li><time>16 Oct</time><div><b>The signal-adapter interface</b><p>Every junction change on a green corridor is now logged as the request SUTRA would send a city's signal controller, shown in the console. A written contract (<code>docs/signal-adapter.md</code>), a dispatch function that stays off until an authority connects a controller, and a reference city-side adapter, tested against each other. Building it found that a corridor whose phone died was never ended; a job now ends those after two minutes of silence.</p></div></li>
+        <li><time>16 Oct</time><div><b>No gaps from dead zones</b><p>Positions recorded while a phone has no signal are now kept and sent once it reconnects, into the vehicle's history only, so trips and replay have no holes and nothing live is disturbed by old data.</p></div></li>
         <li><time>22 Sep</time><div><b>Alerts, green corridor, layout</b><p>Beeping alerts and automatic overspeed warnings. The green corridor end to end. Internal database functions locked down. Keyboard and screen-edge alignment fixed across the app. This record added to the repository as <code>docs/project-record.html</code>, kept up to date with every change.</p></div></li>
       </ol>
     </section>
@@ -372,7 +373,7 @@ flowchart LR
       <h3>Driver app</h3>
       <ul>
         <li>Email sign-in; register and choose a vehicle.</li>
-        <li>Streams position every 3 s, or every 1 s for emergency vehicles; works in the background when allowed, and in the foreground if not.</li>
+        <li>Streams position every 3 s, or every 1 s for emergency vehicles; works in the background when allowed, and in the foreground if not. Positions recorded without signal are kept and sent later as history.</li>
         <li>Map follows the driver. Search places, or long-press the map to set a destination; fastest route drawn.</li>
         <li>One tap routes to the nearest hospital, fire station or police station, found around the driver in OpenStreetMap. Without a location fix the app refuses rather than guessing an origin.</li>
         <li><b>Around me:</b> a radar of nearby SUTRA vehicles, emergency ones in green and vehicles being told to give way ringed. Positions are interpolated between updates so the view moves rather than jumps. It states on screen that it sees only SUTRA vehicles, never other traffic or pedestrians.</li>
@@ -474,8 +475,8 @@ flowchart LR
         <table>
           <thead><tr><th>Suite</th><th>Count</th><th>Runs on</th></tr></thead>
           <tbody>
-            <tr><td>App: screens, alerts, corridor, telemetry</td><td class="num">184 passing</td><td>Jest</td></tr>
-            <tr><td>Database rules and triggers, Edge Function handlers</td><td class="num">334 passing</td><td>PGlite (Postgres in WASM), no Docker</td></tr>
+            <tr><td>App: screens, alerts, corridor, telemetry</td><td class="num">201 passing</td><td>Jest</td></tr>
+            <tr><td>Database rules and triggers, Edge Function handlers</td><td class="num">382 passing</td><td>PGlite (Postgres in WASM), no Docker</td></tr>
           </tbody>
         </table>
       </div>

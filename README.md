@@ -313,8 +313,8 @@ npm run apk              # gradlew assembleDebug with ninja parallelism capped
 ## Testing
 
 ```bash
-cd mobile         && npm test && npm run typecheck   # 184 tests
-cd supabase/tests && npm install && npm test         # 334 tests
+cd mobile         && npm test && npm run typecheck   # 201 tests
+cd supabase/tests && npm install && npm test         # 382 tests
 ```
 
 Schema and RLS tests run against **PGlite** — Postgres compiled to WASM, in
@@ -463,6 +463,16 @@ is a reference implementation of the city's side. Corridors whose vehicle has
 been silent for two minutes, or that are past their hour, are ended every
 minute by `end_stale_corridors()`, which releases any junction still held.
 
+## Without signal
+
+A position that fails to get through for want of a network is kept on the
+phone (`src/offlineBuffer.ts`, in AsyncStorage) and sent once a live position
+succeeds again, oldest first, through `record_buffered_positions()`. It goes
+into `position_history` only - never `vehicle_positions` - because replaying
+old fixes as live ones would move the vehicle backwards on every map and run
+every safety check on stale data. Trips and replay include the stretch without
+signal; speeding is not judged on late, phone-timestamped points.
+
 ## Zones and events
 
 Operators draw zones on the console's map (school, hospital, restricted,
@@ -556,7 +566,8 @@ Things that cost real time here and are worth knowing:
   prune keeps 30 days.
 - Public OSRM, Nominatim and Overpass endpoints carry no availability
   guarantee.
-- Push to a closed app needs Firebase configured (see *Alerts that make a
-  sound*). Push receipts are not yet checked, so a delivery Expo accepted but
-  FCM later dropped is not visible.
+- Push receipts are not yet checked, so a delivery Expo accepted but FCM
+  later dropped is not visible.
+- Signal states are simulated until an authority connects a controller
+  (`docs/signal-adapter.md`).
 - Green-corridor signal states are simulated (see above).

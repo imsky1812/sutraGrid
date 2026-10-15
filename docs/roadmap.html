@@ -273,7 +273,7 @@
   <tr><td>10</td><td>PostGIS spatial queries</td><td><span class="tag med">Medium</span></td></tr>
   <tr><td>11</td><td>Per-road speed limits</td><td><span class="tag done">Done · 16 Oct</span></td></tr>
   <tr><td>12</td><td>Signal-adapter interface</td><td><span class="tag done">Done · 16 Oct</span></td></tr>
-  <tr><td>13</td><td>Offline buffering</td><td><span class="tag low">Low</span></td></tr>
+  <tr><td>13</td><td>Offline buffering</td><td><span class="tag done">Done · 16 Oct</span></td></tr>
 </table>
 
 <h2>The phases</h2>
@@ -747,8 +747,19 @@
   <div class="phase-head">
     <span class="phase-no">PHASE 13</span>
     <h3>Offline buffering</h3>
-    <span class="tag low">Low</span>
+    <span class="tag done">Done · 16 Oct</span>
   </div>
+  <p><strong>Shipped:</strong> positions that fail for want of a network are
+    kept on the phone (surviving a restart) and sent once a live position gets
+    through again — as <em>history only</em>, through a checked function, never
+    as the live position. Replaying old fixes as live ones would have moved the
+    vehicle backwards on the map and set off every safety check on stale data.
+    Trips and replay include the stretch without signal. Speeding is
+    deliberately not judged on late, phone-timestamped positions. Future
+    timestamps, anything over 12 hours old, duplicates and malformed points are
+    skipped; a refusal that would recur is not kept. Rehearsed live: five
+    positions into history, the live position untouched. 9 database tests,
+    16 app tests.</p>
   <p>
     Queue positions on the phone when the network drops, flush oldest-first on
     reconnect, capped so it cannot grow without bound. Because the live position
