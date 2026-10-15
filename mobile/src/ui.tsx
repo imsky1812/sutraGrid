@@ -119,19 +119,22 @@ export function Chip({
   glyph,
   label,
   selected,
+  disabled,
   onPress,
 }: {
   glyph?: string;
   label: string;
   selected?: boolean;
+  disabled?: boolean;
   onPress?: () => void;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={{ selected: !!selected }}
+      accessibilityState={{ selected: !!selected, disabled: !!disabled }}
+      disabled={disabled}
       onPress={onPress}
-      style={[styles.chip, selected && styles.chipSelected]}
+      style={[styles.chip, selected && styles.chipSelected, disabled && styles.chipDisabled]}
     >
       {glyph ? <Text style={styles.chipGlyph}>{glyph}</Text> : null}
       <Text
@@ -255,6 +258,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   chipSelected: { backgroundColor: color.accent, borderColor: color.accent },
+  chipDisabled: { opacity: 0.45 },
   chipGlyph: { fontSize: 13 },
   chipLabel: { fontSize: 12, fontWeight: '700', color: color.muted },
 

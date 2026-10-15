@@ -16,7 +16,14 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { listMyVehicles, Vehicle } from '../src/vehicles';
 import { setAlertMessage, setDestination, startTelemetry, stopTelemetry } from '../src/telemetry';
 import { fetchRoute } from '../src/directions';
-import { describePoint, Place, searchPlaces } from '../src/places';
+import {
+  describePoint,
+  findNearestServices,
+  NearestPlace,
+  Place,
+  searchPlaces,
+  ServiceKind,
+} from '../src/places';
 import {
   acknowledgeAlert,
   Alert as FleetAlert,
@@ -44,12 +51,18 @@ import { AccentAction, Badge, Card, Chip, Field, Label, NavBar, PillButton } fro
 import { color, radius, shadow, space, type } from '../src/theme';
 import type { LatLng } from '../src/polyline';
 
+/** Only where the map looks before the first GPS fix. Never a routing origin. */
 const BANGALORE = { latitude: 12.9716, longitude: 77.5946 };
 
-const PRESETS = [
-  { key: 'hospital', glyph: '🏥', name: 'City General Hospital', latitude: 12.976, longitude: 77.601 },
-  { key: 'fire', glyph: '🚒', name: 'Central Fire Station', latitude: 12.975, longitude: 77.589 },
-  { key: 'police', glyph: '🚓', name: 'Metro Police HQ', latitude: 12.969, longitude: 77.591 },
+/**
+ * The emergency chips. These were three fixed Bengaluru coordinates with
+ * invented names, so tapping "police" in Delhi drew a 2,000 km route south.
+ * They are now looked up against the driver's own position.
+ */
+const SERVICES: { key: ServiceKind; glyph: string; label: string }[] = [
+  { key: 'hospital', glyph: '🏥', label: 'Nearest hospital' },
+  { key: 'fire', glyph: '🚒', label: 'Nearest fire station' },
+  { key: 'police', glyph: '🚓', label: 'Nearest police' },
 ];
 
 const NAV_ITEMS = [
@@ -68,6 +81,11 @@ export default function Dashboard() {
   const [destLng, setDestLng] = useState('');
   const [destName, setDestName] = useState('');
   const [activePreset, setActivePreset] = useState<string | null>(null);
+  // The nearest hospital, fire station and police station, once looked up.
+  // Cached for the session: they do not move, and the driver does not move far
+  // enough between taps for it to matter.
+  const [services, setServices] = useState<Partial<Record<ServiceKind, NearestPlace>>>({});
+  const [findingService, setFindingService] = useState<ServiceKind | null>(null);
   // Green corridor, for emergency-authorized vehicles only.
   const [corridorId, setCorridorId] = useState<string | null>(null);
   const [corridorPlan, setCorridorPlan] = useState<CorridorPlan | null>(null);
@@ -255,8 +273,16 @@ export default function Dashboard() {
       setDestLng(String(target.longitude));
       setDestName(target.name);
 
+      // No fallback origin. Routing from a guessed city centre is how a
+      // destination two thousand kilometres away looked like a working route.
+      if (!here) {
+        setRoute([]);
+        setRouting(false);
+        return setError('Waiting for your location before planning a route.');
+      }
+
       try {
-        setRoute(await fetchRoute(here ?? BANGALORE, target));
+        setRoute(await fetchRoute(here, target));
       } catch (e) {
         setRoute([]);
         setError((e as Error).message);
@@ -266,6 +292,29 @@ export default function Dashboard() {
     },
     [here],
   );
+
+  /** Route to the nearest hospital, fire station or police station. */
+  async function goToNearest(kind: ServiceKind) {
+    setError(null);
+    if (!here) return setError('Waiting for your location before finding the nearest one.');
+
+    const known = services[kind];
+    if (known) return applyDestination(known, kind);
+
+    setFindingService(kind);
+    try {
+      const found = await findNearestServices(kind, here);
+      if (found.length === 0) {
+        return setError('Nothing of that kind is mapped near you. Try searching by name.');
+      }
+      setServices((current) => ({ ...current, [kind]: found[0] }));
+      await applyDestination(found[0], kind);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setFindingService(null);
+    }
+  }
 
   async function runSearch() {
     setError(null);
@@ -310,10 +359,12 @@ export default function Dashboard() {
   async function openCorridor() {
     if (!vehicle || !hasDestination) return;
     setError(null);
+    if (!here) return setError('Waiting for your location before opening a corridor.');
+
     setCorridorBusy(true);
     try {
       const destination = { latitude: Number(destLat), longitude: Number(destLng) };
-      const plan = await planCorridor(here ?? BANGALORE, destination);
+      const plan = await planCorridor(here, destination);
       const id = await startCorridor(vehicle.id, destName || 'Destination', plan);
       corridorRef.current = id;
       setCorridorPlan(plan);
@@ -625,18 +676,31 @@ export default function Dashboard() {
 
               <Text style={type.muted}>Or long-press anywhere on the map to set a destination.</Text>
 
-              <Label>Frequent destinations</Label>
+              <Label>Emergency services near you</Label>
               <View style={styles.chipRow}>
-                {PRESETS.map((p) => (
-                  <Chip
-                    key={p.key}
-                    glyph={p.glyph}
-                    label={p.name}
-                    selected={activePreset === p.key}
-                    onPress={() => applyDestination(p, p.key)}
-                  />
-                ))}
+                {SERVICES.map((s) => {
+                  const found = services[s.key];
+                  return (
+                    <Chip
+                      key={s.key}
+                      glyph={s.glyph}
+                      label={
+                        findingService === s.key
+                          ? 'Finding…'
+                          : found
+                            ? `${found.name.split(',')[0]} · ${formatDistance(found.distanceMeters)}`
+                            : s.label
+                      }
+                      selected={activePreset === s.key}
+                      disabled={!here || findingService !== null}
+                      onPress={() => goToNearest(s.key)}
+                    />
+                  );
+                })}
               </View>
+              {here ? null : (
+                <Text style={type.muted}>Waiting for your location to find these.</Text>
+              )}
 
               {routing ? <Text style={type.muted}>Finding a route…</Text> : null}
               {hasDestination ? (

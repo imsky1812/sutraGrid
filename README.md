@@ -188,6 +188,7 @@ row for a vehicle speeding right now is not stale data.
 | Tiles | OpenFreeMap (OpenStreetMap data) | none |
 | Routing | OSRM | none |
 | Geocoding | Nominatim | none |
+| Nearest hospital / fire / police | Overpass (OpenStreetMap) | none |
 | Traffic signals | Overpass (OpenStreetMap) | none |
 
 Routing and geocoding go through Edge Functions rather than being called
@@ -220,6 +221,8 @@ npx supabase link --project-ref <ref>
 npx supabase db push
 npx supabase functions deploy directions
 npx supabase functions deploy geocode
+npx supabase functions deploy corridor
+npx supabase functions deploy nearby
 ```
 
 ### 3. Dashboard
@@ -262,8 +265,8 @@ npm run apk              # gradlew assembleDebug with ninja parallelism capped
 ## Testing
 
 ```bash
-cd mobile         && npm test && npm run typecheck   # 99 tests
-cd supabase/tests && npm install && npm test         # 147 tests
+cd mobile         && npm test && npm run typecheck   # 113 tests
+cd supabase/tests && npm install && npm test         # 174 tests
 ```
 
 Schema and RLS tests run against **PGlite** — Postgres compiled to WASM, in
@@ -275,6 +278,24 @@ The runner is pinned to `--test-concurrency=1`: each test boots its own WASM
 Postgres, and running files in parallel exhausts memory.
 
 ---
+
+## Emergency destinations
+
+One tap routes to the nearest hospital, fire station or police station. These
+are looked up around the driver in OpenStreetMap, not stored: they were three
+fixed Bengaluru coordinates until a driver in Delhi tapped one and got a
+2,000 km route.
+
+The search widens through 5, 15 and 40 km until something is found, so a rural
+road still gets an answer. If no location fix has arrived yet the chips are
+disabled and routing refuses - a guessed origin is what made the wrong route
+look like a working one.
+
+## Roadmap
+
+`docs/roadmap.html`, and the same thing as `docs/SUTRA-roadmap.pdf`: the
+remaining features as fourteen phases, ordered by dependency, with what each
+one delivers and what it honestly cannot. Kept up to date alongside the record.
 
 ## Project record
 
@@ -322,7 +343,11 @@ Things that cost real time here and are worth knowing:
 - **overpass-api.de answers 406 to generic library user agents** (curl,
   okhttp), and okhttp is what React Native's `fetch` sends on Android. Always
   send `Accept: application/json` and a real `User-Agent`. It also 406s, 504s
-  or 429s the Edge Function unpredictably, hence the phone-side retry.
+  or 429s the Edge Function unpredictably, hence the phone-side retry. On 15
+  October the same query that returned 200 from an ordinary network was
+  answered 406 by Overpass, 500 by its mirror and 403 by Nominatim when it came
+  from the Edge runtime, so **every** OpenStreetMap lookup needs that retry,
+  not just the corridor's junctions.
 - **Android fixes a notification channel's sound on first creation.** Changing
   the beep means a new channel id (`sutra-alerts-v1` → `-v2`).
 - **Functions in `public` are REST endpoints.** Postgres grants EXECUTE to

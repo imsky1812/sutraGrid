@@ -302,14 +302,14 @@
 
     <section id="status">
       <h2>Where it stands</h2>
-      <p>Everything below is built, tested, deployed and pushed to <code>main</code>. On 22 September the app streamed positions and acknowledged alerts from a real phone, so delivery works end to end. Still unchecked on a device: the beep itself, a corridor on a real road, and the keyboard and alignment fixes.</p>
+      <p>Everything below is built, tested, deployed and pushed to <code>main</code>. On 22 September the app streamed positions and acknowledged alerts from a real phone, so delivery works end to end. Still unchecked on a device: the beep itself, a corridor on a real road, the keyboard and alignment fixes, and the new emergency-destination chips. The remaining work is planned in <a href="roadmap.html">the roadmap</a> (also <code>docs/SUTRA-roadmap.pdf</code>).</p>
       <div class="links">
         <div><span>Operator console</span><a href="https://sutra-control.expo.app">sutra-control.expo.app</a></div>
         <div><span>Source</span><a href="https://github.com/imsky1812/sutraGrid">github.com/imsky1812/sutraGrid</a></div>
         <div><span>Latest APK</span><code>sutra-vehicle-oct15.apk</code><br><small class="mono">EAS build ee5a8c2f · 15 Oct 2026</small></div>
         <div><span>Supabase project</span><code>ytqpjxpzhgintwpbujcy</code></div>
         <div><span>EAS project</span><code>@imsky1812s-org/sutra-vehicle</code></div>
-        <div><span>Edge Functions</span><code>directions · geocode · corridor</code></div>
+        <div><span>Edge Functions</span><code>directions · geocode · corridor · nearby</code></div>
       </div>
     </section>
 
@@ -349,6 +349,7 @@ flowchart LR
         <li><time>19 Aug</time><div><b>Cleanup and device fixes</b><p>Removed the old Kotlin client and Node relay, rewrote the README, centred the map on the real location, added crash reporting on next launch.</p></div></li>
         <li><time>21 Sep</time><div><b>Stability</b><p>Fixed the app closing by itself (the missing notification permission killed the background service) and made position streaming work without background permission, so vehicles appear on the console.</p></div></li>
         <li><time>15 Oct</time><div><b>Authorizing vehicles from the console</b><p>Emergency authorization is now granted in the console instead of the SQL editor: a Vehicles screen listing every registered vehicle, a checked function behind it, and an audit record of who granted what. APK rebuilt, since Expo artifacts expire after 14 days.</p></div></li>
+        <li><time>15 Oct</time><div><b>Emergency destinations, and a roadmap</b><p>The hospital, fire and police chips were fixed coordinates in Bengaluru, so tapping one in Delhi drew a 2,000 km route. They now look up the real nearest service around the driver through a new <code>nearby</code> Edge Function, with a retry from the phone because the public Overpass and Nominatim servers refuse the Edge runtime. Routing and corridors no longer fall back to a guessed city centre: without a location they refuse. The remaining backlog was planned as fourteen phases in <code>docs/roadmap.html</code> and <code>docs/SUTRA-roadmap.pdf</code>.</p></div></li>
         <li><time>22 Sep</time><div><b>Alerts, green corridor, layout</b><p>Beeping alerts and automatic overspeed warnings. The green corridor end to end. Internal database functions locked down. Keyboard and screen-edge alignment fixed across the app. This record added to the repository as <code>docs/project-record.html</code>, kept up to date with every change.</p></div></li>
       </ol>
     </section>
@@ -360,6 +361,7 @@ flowchart LR
         <li>Email sign-in; register and choose a vehicle.</li>
         <li>Streams position every 3 s, or every 1 s for emergency vehicles; works in the background when allowed, and in the foreground if not.</li>
         <li>Map follows the driver. Search places, or long-press the map to set a destination; fastest route drawn.</li>
+        <li>One tap routes to the nearest hospital, fire station or police station, found around the driver in OpenStreetMap. Without a location fix the app refuses rather than guessing an origin.</li>
         <li>Alerts beep, vibrate and show a notification with no tap needed.</li>
         <li>Crashes are captured and shown on the next launch.</li>
       </ul>
@@ -441,8 +443,8 @@ flowchart LR
         <table>
           <thead><tr><th>Suite</th><th>Count</th><th>Runs on</th></tr></thead>
           <tbody>
-            <tr><td>App: screens, alerts, corridor, telemetry</td><td class="num">99 passing</td><td>Jest</td></tr>
-            <tr><td>Database rules and triggers, Edge Function handlers</td><td class="num">159 passing</td><td>PGlite (Postgres in WASM), no Docker</td></tr>
+            <tr><td>App: screens, alerts, corridor, telemetry</td><td class="num">113 passing</td><td>Jest</td></tr>
+            <tr><td>Database rules and triggers, Edge Function handlers</td><td class="num">174 passing</td><td>PGlite (Postgres in WASM), no Docker</td></tr>
           </tbody>
         </table>
       </div>
@@ -492,7 +494,7 @@ flowchart LR
         <li><b>Config over env.</b> EAS environment variables never reached the bundle; config lives in <code>app.config.ts</code> instead.</li>
         <li><b>Edge to edge.</b> Android draws under the system bars and no longer resizes for the keyboard, so every edge offset needs safe-area insets and keyboard avoidance needs padding.</li>
         <li><b>Background tasks.</b> A throw in the background location task kills the app, and a foreground service without notification permission is killed by Android.</li>
-        <li><b>Overpass.</b> It refuses generic user agents (including okhttp, which React Native sends), so always send a real User-Agent and <code>Accept: application/json</code>.</li>
+        <li><b>Overpass and Nominatim from a data centre.</b> Both refuse generic user agents (including okhttp, which React Native sends), so always send a real User-Agent and <code>Accept: application/json</code>. Even then, the same query that returns 200 from an ordinary network was answered 406, 500 and 403 when it came from the Edge runtime, so anything that depends on them also needs a retry from the phone.</li>
         <li><b>Public functions.</b> Every function in the public schema is a REST endpoint; SECURITY DEFINER helpers need an explicit revoke.</li>
       </ul>
     </section>

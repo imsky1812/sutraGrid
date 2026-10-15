@@ -62,10 +62,20 @@ jest.mock('../src/directions', () => ({
   fetchRoute: (...a: unknown[]) => mockFetchRoute(...a),
 }));
 
+const mockFindNearestServices = jest.fn();
+
 jest.mock('../src/places', () => ({
   searchPlaces: jest.fn().mockResolvedValue([]),
   describePoint: jest.fn().mockResolvedValue('Pinned point'),
+  findNearestServices: (...a: unknown[]) => mockFindNearestServices(...a),
 }));
+
+const NEAREST_HOSPITAL = {
+  name: 'City General Hospital',
+  latitude: 12.976,
+  longitude: 77.601,
+  distanceMeters: 640,
+};
 
 const mockPlanCorridor = jest.fn();
 const mockStartCorridor = jest.fn();
@@ -101,7 +111,15 @@ describe('Dashboard', () => {
     mockStopTelemetry.mockResolvedValue(undefined);
     mockFetchRoute.mockResolvedValue([]);
     mockListMyVehicles.mockResolvedValue([vehicle()]);
+    mockFindNearestServices.mockResolvedValue([NEAREST_HOSPITAL]);
   });
+
+  /** Tap the hospital chip and wait for it to become the real nearest one. */
+  const chooseNearestHospital = async () => {
+    await waitFor(() => expect(screen.getByText('Nearest hospital')).toBeTruthy());
+    fireEvent.press(screen.getByText('Nearest hospital'));
+    await waitFor(() => expect(screen.getByText(/City General Hospital ·/)).toBeTruthy());
+  };
 
   it('starts telemetry for the selected vehicle', async () => {
     await render(<Dashboard />);
@@ -138,6 +156,56 @@ describe('Dashboard', () => {
     await waitFor(() => expect(screen.getByText(/Start green corridor/i)).toBeTruthy());
   });
 
+  // These chips were three fixed Bengaluru coordinates, so a driver in Delhi
+  // who tapped "police" got a 2,000 km route. They must now be looked up
+  // against the driver's own position, and must refuse rather than guess.
+  describe('emergency services', () => {
+    it('looks up the nearest service around the driver', async () => {
+      await render(<Dashboard />);
+      await chooseNearestHospital();
+
+      // The driver's own position from the location mock - not a city centre.
+      expect(mockFindNearestServices).toHaveBeenCalledWith('hospital', {
+        latitude: 12.97,
+        longitude: 77.59,
+      });
+      expect(mockSetDestination).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'City General Hospital' }),
+      );
+    });
+
+    it('shows how far away the one it found is', async () => {
+      await render(<Dashboard />);
+      await chooseNearestHospital();
+      expect(screen.getByText(/City General Hospital · 640 m/)).toBeTruthy();
+    });
+
+    it('asks only once per service', async () => {
+      await render(<Dashboard />);
+      await chooseNearestHospital();
+      fireEvent.press(screen.getByText(/City General Hospital ·/));
+      await waitFor(() => expect(mockFetchRoute).toHaveBeenCalledTimes(2));
+      expect(mockFindNearestServices).toHaveBeenCalledTimes(1);
+    });
+
+    it('says so when nothing of that kind is mapped nearby', async () => {
+      mockFindNearestServices.mockResolvedValue([]);
+      await render(<Dashboard />);
+      await waitFor(() => expect(screen.getByText('Nearest fire station')).toBeTruthy());
+      fireEvent.press(screen.getByText('Nearest fire station'));
+      await waitFor(() => expect(screen.getByText(/Nothing of that kind is mapped/i)).toBeTruthy());
+    });
+
+    it('reports a lookup failure rather than routing somewhere wrong', async () => {
+      mockFindNearestServices.mockRejectedValue(new Error('Could not look up the nearest police station.'));
+      await render(<Dashboard />);
+      await waitFor(() => expect(screen.getByText('Nearest police')).toBeTruthy());
+      fireEvent.press(screen.getByText('Nearest police'));
+      await waitFor(() => expect(screen.getByText(/Could not look up/i)).toBeTruthy());
+      expect(mockFetchRoute).not.toHaveBeenCalled();
+    });
+  });
+
   describe('green corridor', () => {
     const PLAN = {
       route: [
@@ -159,8 +227,7 @@ describe('Dashboard', () => {
 
     const startOne = async () => {
       await render(<Dashboard />);
-      await waitFor(() => expect(screen.getByText('City General Hospital')).toBeTruthy());
-      fireEvent.press(screen.getByText('City General Hospital'));
+      await chooseNearestHospital();
       await openCorridorPane();
       await waitFor(() => expect(screen.getByText(/Start green corridor/i)).toBeTruthy());
       fireEvent.press(screen.getByText(/Start green corridor/i));
@@ -206,8 +273,7 @@ describe('Dashboard', () => {
     it('explains a refusal from the server', async () => {
       mockStartCorridor.mockRejectedValue(new Error('This vehicle is not authorized to open a green corridor.'));
       await render(<Dashboard />);
-      await waitFor(() => expect(screen.getByText('City General Hospital')).toBeTruthy());
-      fireEvent.press(screen.getByText('City General Hospital'));
+      await chooseNearestHospital();
       await openCorridorPane();
       await waitFor(() => expect(screen.getByText(/Start green corridor/i)).toBeTruthy());
       fireEvent.press(screen.getByText(/Start green corridor/i));

@@ -1,0 +1,643 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SUTRA Feature Roadmap</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground: #F6F7F2;
+    --paper: #FFFFFF;
+    --ink: #161A12;
+    --muted: #5C6354;
+    --line: #DCE0D3;
+    --accent: #4E6B00;
+    --accent-soft: #EEF5D6;
+    --done: #1F7A3A;
+    --done-soft: #E3F3E7;
+    --high: #B3261E;
+    --high-soft: #FBE7E5;
+    --med: #9A5B00;
+    --med-soft: #FBEFD9;
+    --low: #41566B;
+    --low-soft: #E7EEF4;
+    --code-bg: #EFF1EA;
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 15.5px;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0 20px 64px;
+  }
+  .page { max-width: 820px; margin: 0 auto; }
+
+  header.cover {
+    padding: 56px 0 28px;
+    border-bottom: 3px solid var(--ink);
+    margin-bottom: 36px;
+  }
+  .mark {
+    font-family: var(--display);
+    font-weight: 800;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    font-size: 12px;
+    color: var(--accent);
+  }
+  h1 {
+    font-family: var(--display);
+    font-weight: 800;
+    font-size: clamp(32px, 6vw, 46px);
+    line-height: 1.05;
+    margin: 10px 0 12px;
+    letter-spacing: -0.02em;
+  }
+  .sub { color: var(--muted); max-width: 60ch; margin: 0; }
+  .meta {
+    margin-top: 18px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 20px;
+  }
+
+  h2 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 22px;
+    letter-spacing: -0.01em;
+    margin: 40px 0 6px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+  }
+  h2:first-of-type { border-top: none; padding-top: 0; }
+  h3 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 16px;
+    margin: 22px 0 6px;
+  }
+  p { margin: 0 0 12px; }
+  ul, ol { margin: 0 0 12px; padding-left: 20px; }
+  li { margin-bottom: 5px; }
+  code {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: var(--code-bg);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px 14px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; }
+  a { color: var(--accent); }
+
+  .phase {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin: 0 0 16px;
+    break-inside: avoid;
+  }
+  .phase-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+  }
+  .phase-no {
+    font-family: var(--mono);
+    font-weight: 500;
+    font-size: 12px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+  }
+  .phase-head h3 { margin: 0; font-size: 18px; }
+
+  .tag {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border-radius: 999px;
+    padding: 2px 9px;
+    white-space: nowrap;
+    border: 1px solid transparent;
+  }
+  .tag.high { color: var(--high); background: var(--high-soft); }
+  .tag.med { color: var(--med); background: var(--med-soft); }
+  .tag.low { color: var(--low); background: var(--low-soft); }
+  .tag.done { color: var(--done); background: var(--done-soft); }
+  .tag.bug { color: #FFF; background: var(--high); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0 0 16px;
+    font-size: 14px;
+    break-inside: avoid;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  th {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 2px solid var(--line);
+  }
+
+  .callout {
+    background: var(--accent-soft);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 8px 8px 0;
+    padding: 12px 16px;
+    margin: 0 0 16px;
+    break-inside: avoid;
+  }
+  .callout.warn { background: var(--high-soft); border-left-color: var(--high); }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout strong { font-family: var(--display); }
+
+  footer {
+    margin-top: 48px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  @page { size: A4; margin: 16mm 14mm; }
+  @media print {
+    body { background: #FFF; padding: 0; font-size: 10.5pt; line-height: 1.5; }
+    .page { max-width: none; }
+    header.cover { padding-top: 0; break-after: avoid; }
+    h2 { break-after: avoid; }
+    .phase { break-inside: avoid; box-shadow: none; }
+    a { color: var(--ink); text-decoration: none; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header class="cover">
+  <div class="mark">SUTRA · Traffic intelligence</div>
+  <h1>Feature roadmap</h1>
+  <p class="sub">
+    Everything in <em>Features to add in SUTRA</em> (15 October 2026), turned into an
+    ordered path. Fourteen phases, each one ending in something that runs, is
+    tested, and can be shown to somebody.
+  </p>
+  <div class="meta">
+    <span>15 October 2026</span>
+    <span>Sarvesh Kumar Yadav</span>
+    <span>Source: featuressutra.pdf</span>
+    <span>Record: docs/project-record.html</span>
+  </div>
+</header>
+
+<h2>How this is ordered</h2>
+
+<p>
+  The source document lists a headline feature and a backlog ranked High /
+  Medium / Low by effort against payoff. This roadmap keeps those priorities but
+  sequences by <strong>dependency</strong>, because two of them cannot be built
+  in the order they were written:
+</p>
+
+<div class="callout warn">
+  <p>
+    <strong>A live bug outranks every feature.</strong> Tapping an emergency
+    destination (hospital, fire, police) in Delhi drew a 2,000&nbsp;km route to
+    Bengaluru. The three chips were hardcoded coordinates with invented names
+    ("Metro Police HQ"). On the emergency path, a wrong destination is worse
+    than a missing one, so this is Phase&nbsp;0.
+  </p>
+</div>
+
+<div class="callout">
+  <p>
+    <strong>The surroundings view cannot use Realtime.</strong> The source
+    document's first build step says to subscribe to nearby vehicles. Row-level
+    security lets a driver read only their <em>own</em> position row, and
+    Supabase Realtime only delivers rows the subscriber may select — so a
+    driver's subscription returns their own vehicle and nothing else. It needs a
+    server-side function instead, which is why Phase&nbsp;2 is larger than the
+    document assumes, and why the simulator moves up to Phase&nbsp;3.
+  </p>
+</div>
+
+<table>
+  <tr><th>Phase</th><th>What it delivers</th><th>Priority</th></tr>
+  <tr><td>0</td><td>Emergency destinations that are actually nearby</td><td><span class="tag done">Done · 15 Oct</span></td></tr>
+  <tr><td>1</td><td>Shared geometry: bearing, projection, relative position</td><td><span class="tag low">Groundwork</span></td></tr>
+  <tr><td>2</td><td>Live surroundings view — radar + map toggle</td><td><span class="tag high">Headline</span></td></tr>
+  <tr><td>3</td><td>Vehicle simulator</td><td><span class="tag med">Medium</span></td></tr>
+  <tr><td>4</td><td>Real-device demo run</td><td><span class="tag high">High</span></td></tr>
+  <tr><td>5</td><td>Push to a closed app (FCM)</td><td><span class="tag high">High</span></td></tr>
+  <tr><td>6</td><td>Trip replay + violations view</td><td><span class="tag high">High</span></td></tr>
+  <tr><td>7</td><td>Collision / near-miss warning</td><td><span class="tag med">Medium</span></td></tr>
+  <tr><td>8</td><td>Richer violation types</td><td><span class="tag med">Medium</span></td></tr>
+  <tr><td>9</td><td>Geofencing + event engine</td><td><span class="tag med">Medium</span></td></tr>
+  <tr><td>10</td><td>PostGIS spatial queries</td><td><span class="tag med">Medium</span></td></tr>
+  <tr><td>11</td><td>Per-road speed limits</td><td><span class="tag low">Low</span></td></tr>
+  <tr><td>12</td><td>Signal-adapter interface</td><td><span class="tag low">Low — pitch value</span></td></tr>
+  <tr><td>13</td><td>Offline buffering</td><td><span class="tag low">Low</span></td></tr>
+</table>
+
+<h2>The phases</h2>
+
+<div class="phase">
+  <div class="phase-head">
+    <span class="phase-no">PHASE 0</span>
+    <h3>Fix the emergency destinations</h3>
+    <span class="tag bug">Bug</span>
+    <span class="tag done">Done · 15 Oct</span>
+  </div>
+  <p>
+    <code>PRESETS</code> in <code>mobile/app/dashboard.tsx</code> were static
+    Bengaluru points, and both routing and corridor planning fell back to
+    <code>here ?? BANGALORE</code> — so with no GPS fix the app routed from a
+    guessed city centre rather than refusing.
+  </p>
+  <ul>
+    <li>New Edge Function <code>supabase/functions/nearby/</code>: Overpass
+      <code>nwr(around:R,…)[amenity=hospital|police|fire_station]</code>,
+      widened through 5 / 15 / 40&nbsp;km until something is found, sorted by
+      distance. Reuses the mirror list, <code>Accept: application/json</code>
+      header and real user agent that the corridor function already needs,
+      because the public Overpass servers answer 406 otherwise.</li>
+    <li>Nominatim fallback with <code>bounded=1</code> — without it the viewbox
+      is only a soft preference, which is the same bug more quietly.</li>
+    <li>Chips become live lookups around the driver, labelled with the real
+      name and distance ("Fortis Hospital · 2.4 km"), disabled until a location
+      is known, cached once per service.</li>
+    <li>The <code>BANGALORE</code> fallback is deleted from both routing and
+      corridor planning. Without a fix they now refuse.</li>
+  </ul>
+  <div class="callout warn">
+    <p>
+      <strong>Found on deployment, and it changed the shape of the fix.</strong>
+      The function was deployed and called for a real Delhi coordinate. Overpass
+      answered <code>406</code>, its mirror <code>500</code>, and Nominatim
+      <code>403</code> — while the identical query from an ordinary network
+      returned <code>200</code> with the right stations. The public servers
+      refuse the data centre, not the query. The app therefore also retries
+      straight from the phone, exactly as it already does for the corridor's
+      junctions, and the two paths widen the search identically.
+    </p>
+  </div>
+  <p><strong>Shipped:</strong> 15 handler tests, 9 app tests for the lookup and
+    its fallbacks, 5 dashboard tests for the refusal paths. Totals are now 174
+    database and handler tests, 113 app tests.</p>
+</div>
+
+<div class="phase">
+  <div class="phase-head">
+    <span class="phase-no">PHASE 1</span>
+    <h3>Shared geometry</h3>
+    <span class="tag low">Groundwork</span>
+  </div>
+  <p>
+    Small and boring, and it unblocks Phases 2, 7 and 8. <code>heading</code> is
+    stored in two tables and <strong>read by nothing</strong>; no bearing
+    function exists anywhere in the project.
+  </p>
+  <ul>
+    <li><code>mobile/src/geo.ts</code>: <code>distanceM</code>,
+      <code>bearing</code>, <code>project(from, bearing, metres)</code>,
+      <code>toRelative(ego, other)</code>. The planar formula shared with the
+      database's <code>approx_distance_m</code> lives in one place — the file
+      exists as of Phase&nbsp;0 and already holds <code>distanceM</code>.</li>
+    <li>GPS heading is <code>0</code> whenever the phone is stationary, so a
+      derived bearing from the previous fix is needed above walking pace.</li>
+    <li>Matching SQL <code>public.bearing_deg(...)</code> for the trigger work
+      in later phases.</li>
+  </ul>
+</div>
+
+<div class="phase">
+  <div class="phase-head">
+    <span class="phase-no">PHASE 2</span>
+    <h3>Live surroundings view</h3>
+    <span class="tag high">Headline</span>
+  </div>
+  <p>
+    The driver at the centre, other SUTRA vehicles around them, moving smoothly.
+    Radar canvas first, with a toggle to the map-centred version.
+  </p>
+  <h3>Server</h3>
+  <p>
+    A <code>nearby_vehicles(vehicle_id, radius_m)</code> security-definer
+    function, polled at the telemetry cadence, because Realtime cannot do this
+    (see above). Each rule gets a test:
+  </p>
+  <ul>
+    <li>the caller must own the vehicle they are asking as;</li>
+    <li>radius clamped, result capped, rows older than ~15&nbsp;s excluded;</li>
+    <li><strong>no identity leaves the server</strong> — an opaque per-call
+      reference, kinematics and vehicle type only. Never a plate or a driver
+      name. This is what keeps a connected-awareness feature defensible under
+      the DPDP Act, and it is worth saying out loud in a pitch;</li>
+    <li>a <code>warned</code> flag, so vehicles currently told to give way can
+      be flashed.</li>
+  </ul>
+  <h3>Client</h3>
+  <ul>
+    <li><code>surroundings.ts</code> — poll loop and dead reckoning. This is what
+      makes it look live: positions arrive every 1–3&nbsp;s, so between updates
+      each vehicle is carried forward along its own heading and speed, and a
+      ghost stops moving after about six seconds without news.</li>
+    <li><code>Radar.tsx</code> — ego fixed centre, pointing up; range rings at
+      100 / 200 / 400&nbsp;m; others placed by <em>relative</em> bearing.
+      Built from plain views and Reanimated, which the project already has —
+      no new native module, because a new one cannot be tested before it is
+      installed on a phone.</li>
+  </ul>
+  <div class="callout">
+    <p>
+      <strong>Stated in the view itself,</strong> the way the corridor's SIM
+      badge is: only SUTRA vehicles appear. No pedestrians, no unconnected
+      traffic, no lane detail — that needs sensors on the vehicle. An empty
+      radar means nobody nearby is running SUTRA, not that the road is clear.
+    </p>
+  </div>
+</div>
+
+<div class="phase">
+  <div class="phase-head">
+    <span class="phase-no">PHASE 3</span>
+    <h3>Vehicle simulator</h3>
+    <span class="tag med">Medium — moved up</span>
+  </div>
+  <p>
+    Ranked Medium in the source document, but Phase&nbsp;2 cannot be
+    <em>demonstrated</em> without it: the radar needs other vehicles and there is
+    one phone. Nothing like it exists in the repository today.
+  </p>
+  <p>
+    A script that signs in as a few seeded drivers, routes each along a real
+    OSRM path and posts positions at the real cadence. It goes through the
+    ordinary client path, so the triggers, violations, corridor warnings and the
+    radar all exercise production code. One of them can be made to speed, to
+    show the beep.
+  </p>
+</div>
+
+<div class="phase">
+  <div class="phase-head">
+    <span class="phase-no">PHASE 4</span>
+    <h3>Real-device demo run</h3>
+    <span class="tag high">High</span>
+  </div>
+  <p>
+    Not code. Install the build, drive a route with the simulator running
+    alongside, record it, and write what was actually observed into the project
+    record. Until this happens, "not verified on a device" stands — and it is
+    the first thing a jury or a traffic authority will ask about.
+  </p>
+</div>
+
+<div class="phase">
+  <div class="phase-head">
+    <span class="phase-no">PHASE 5</span>
+    <h3>Push to a closed app</h3>
+    <span class="tag high">High — the main safety gap</span>
+  </div>
+  <p>
+    Every notification today is <em>local</em>: an alert arrives over the open
+    websocket and the app posts it itself. A closed app hears nothing, and
+    emergency alerts expire in minutes, so they are already stale by the next
+    launch.
+  </p>
+  <ul>
+    <li>A device-token table with own-rows-only access, and registration through
+      the existing EAS project id.</li>
+    <li>A <code>notify</code> function posting to Expo's push service with the
+      existing alert channel and high priority, so the device wakes.</li>
+    <li>Fired from the alert trigger through <code>pg_net</code> — available on
+      this project but not installed, so the extension needs the same guard the
+      scheduler already uses, or every schema test breaks.</li>
+  </ul>
+  <div class="callout warn">
+    <p>
+      <strong>Needs you:</strong> FCM V1 credentials — a Firebase project, its
+      service-account key uploaded to EAS, and a new build. It cannot be done
+      from the repository.
+    </p>
+  </div>
+</div>
+
+<div class="phase">
+  <div class="phase-head">
+    <span class="phase-no">PHASE 6</span>
+    <h3>Trip replay and violations</h3>
+    <span class="tag high">High — cheap, demos well</span>
+  </div>
+  <ul>
+    <li>A replay scrubber over a vehicle's stored track in the console, with
+      violation pins and a density view.</li>
+    <li>A driver-facing history screen: recent trips, distance, top speed, own
+      violations. Row-level security already permits exactly this.</li>
+    <li><strong>A bug to fix on the way:</strong> the console subscribes to
+      violation inserts, but that table is not in the Realtime publication — so
+      that handler has never once fired.</li>
+  </ul>
+</div>
+
+<div class="phase">
+  <div class="phase-head">
+    <span class="phase-no">PHASE 7</span>
+    <h3>Collision / near-miss warning</h3>
+    <span class="tag med">Medium — strongest safety story</span>
+  </div>
+  <p>
+    A trigger beside the corridor one: for vehicles within a few hundred metres,
+    project both forward and compute time to closest approach; warn both when
+    that is short and close. Dedupe and cool down the way corridor warnings
+    already do — the failure mode here is a phone beeping continuously in slow
+    traffic, so the cooldown and a minimum closing speed <em>are</em> the
+    feature, not a detail.
+  </p>
+</div>
+
+<div class="phase">
+  <div class="phase-head">
+    <span class="phase-no">PHASE 8</span>
+    <h3>Richer violation types</h3>
+    <span class="tag med">Medium</span>
+  </div>
+  <ul>
+    <li><strong>Harsh braking</strong> — deceleration against the previous
+      stored position, with the threshold as data rather than code.</li>
+    <li><strong>Wrong direction</strong> — honestly scoped. Without a one-way
+      road layer this is only reliable <em>against a corridor route</em>. Doing
+      it for any road needs OpenStreetMap one-way data, so it waits for
+      Phase&nbsp;11.</li>
+  </ul>
+</div>
+
+<div class="phase">
+  <div class="phase-head">
+    <span class="phase-no">PHASE 9</span>
+    <h3>Geofencing and an event engine</h3>
+    <span class="tag med">Medium</span>
+  </div>
+  <p>
+    Named zones, and one <code>events</code> table with a real taxonomy — zone
+    enter and exit, overspeed, harsh brake, conflict, corridor start and end —
+    which the existing triggers emit into instead of each inventing its own
+    shape. The console's event log becomes a view over one table rather than
+    strings assembled in the browser.
+  </p>
+</div>
+
+<div class="phase">
+  <div class="phase-head">
+    <span class="phase-no">PHASE 10</span>
+    <h3>PostGIS spatial queries</h3>
+    <span class="tag med">Medium — and the one with a trap</span>
+  </div>
+  <div class="callout warn">
+    <p>
+      <strong>The trap:</strong> PostGIS is available on the project but not
+      installed, and the test harness runs Postgres compiled to WebAssembly,
+      which <em>cannot load it</em>. The moment a migration says
+      <code>create extension postgis</code> unguarded, every schema test breaks.
+    </p>
+  </div>
+  <ol>
+    <li>Guard the extension the way the scheduler is already guarded.</li>
+    <li>Add a geography column and spatial index, keep the planar function as
+      the fallback path, and prefer the index when it exists.</li>
+    <li>Verify on a database branch, since it cannot be covered locally — and
+      say so in the README, rather than letting a test count imply coverage
+      that does not exist.</li>
+  </ol>
+  <p>
+    The payoff is real: stored positions grow by thousands of rows per
+    vehicle-hour, and this is the direct answer to "does it scale?".
+  </p>
+</div>
+
+<div class="phase">
+  <div class="phase-head">
+    <span class="phase-no">PHASE 11</span>
+    <h3>Per-road speed limits</h3>
+    <span class="tag low">Low</span>
+  </div>
+  <p>
+    A speed-zone table seeded from OpenStreetMap <code>maxspeed</code>, replacing
+    one global 80&nbsp;km/h, falling back to the global value where no zone is
+    known. Cleanest once the spatial work of Phase&nbsp;10 is in place.
+  </p>
+</div>
+
+<div class="phase">
+  <div class="phase-head">
+    <span class="phase-no">PHASE 12</span>
+    <h3>Signal-adapter interface</h3>
+    <span class="tag low">Low effort — highest pitch value</span>
+  </div>
+  <p>
+    The single most useful item for an authority pitch, because it turns
+    "simulated" into "here is where your controller plugs in".
+  </p>
+  <ul>
+    <li>A written interface: request pre-emption for a junction at a time,
+      confirm, release.</li>
+    <li>A function stub with the real shape and a simulation driver that does
+      what the corridor trigger does today.</li>
+    <li>A command log recording every instruction that <em>would</em> have been
+      sent. A reviewer can then see exactly what SUTRA asks of a city — and
+      that SUTRA never assumed control of anything.</li>
+  </ul>
+</div>
+
+<div class="phase">
+  <div class="phase-head">
+    <span class="phase-no">PHASE 13</span>
+    <h3>Offline buffering</h3>
+    <span class="tag low">Low</span>
+  </div>
+  <p>
+    Queue positions on the phone when the network drops, flush oldest-first on
+    reconnect, capped so it cannot grow without bound. Because the live position
+    is a single upserted row, the queue mainly serves history continuity — a
+    naive flush would replay stale positions as though they were current.
+  </p>
+</div>
+
+<h2>What is deliberately not here</h2>
+<p>
+  The source document is clear about the limits of the approach, and they belong
+  in the plan as much as the features do:
+</p>
+<ul>
+  <li><strong>Non-SUTRA vehicles, pedestrians and lanes.</strong> That needs
+    cameras and sensors on the vehicle. SUTRA is cooperative awareness between
+    connected vehicles — a different mechanism, which scales with adoption
+    rather than with hardware.</li>
+  <li><strong>Control of real traffic signals.</strong> Not legally available to
+    a private application in India; it needs a city's adaptive signal control
+    and police authority. Phase&nbsp;12 documents the join rather than
+    pretending it exists.</li>
+  <li><strong>Live traffic data.</strong> Routing uses speed limits, not
+    congestion. Worth stating whenever "fastest route" is shown.</li>
+</ul>
+
+<h2>How each phase finishes</h2>
+<pre><code>cd supabase/tests &amp;&amp; npm test     # schema and RLS, Postgres in WASM
+cd mobile &amp;&amp; npm test &amp;&amp; npm run typecheck
+cd mobile &amp;&amp; npx expo export      # catches missing peers before an EAS queue</code></pre>
+<p>
+  Then: apply the migration and rehearse the live path inside a rolled-back
+  transaction, deploy any changed function, redeploy the console, and rebuild
+  the app only at the end of a group of phases that changed it.
+</p>
+<p>
+  <strong>Standing rule:</strong> every phase also updates
+  <code>docs/project-record.html</code> and the README's feature, data-model and
+  test-count tables. The record is the document an outside reader is given.
+</p>
+
+<footer>
+  SUTRA feature roadmap · generated from <code>docs/roadmap.html</code> ·
+  15 October 2026. Legal notes in this document are practical context, not legal
+  advice.
+</footer>
+
+</div>
+</body>
+</html>

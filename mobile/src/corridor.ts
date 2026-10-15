@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { distanceM } from './geo';
 
 /**
  * Green corridor client. The database decides who may open a corridor, which
@@ -191,13 +192,6 @@ export function watchCorridor(
   return () => {
     supabase.removeChannel(channel);
   };
-}
-
-// Same planar approximation as the server, so client and database agree.
-function distanceM(a: [number, number], b: [number, number]): number {
-  const dy = (b[0] - a[0]) * 110540;
-  const dx = (b[1] - a[1]) * 111320 * Math.cos((((a[0] + b[0]) / 2) * Math.PI) / 180);
-  return Math.sqrt(dx * dx + dy * dy);
 }
 
 /** Metres travelled along the route, taken at its nearest point. */

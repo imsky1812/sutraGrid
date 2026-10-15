@@ -1,0 +1,256 @@
+// Request handler for the nearest-emergency-service Edge Function.
+//
+// The app's three emergency chips (hospital, fire station, police) used to be
+// hardcoded Bengaluru coordinates with invented names, so a driver in Delhi
+// tapping the police chip was routed two thousand kilometres south. This finds
+// the real thing nearest to wherever the driver actually is.
+//
+// Overpass first, because "nearest amenity to this point" is a spatial query
+// and OpenStreetMap answers it exactly. Nominatim is the fallback: it is a text
+// search, so it can only be biased toward a box, never sorted by distance.
+//
+// Like the other functions, this file has no Deno globals so it can be unit
+// tested under Node; index.ts is the wiring.
+
+export type LatLng = { latitude: number; longitude: number };
+
+export type Place = {
+  name: string;
+  latitude: number;
+  longitude: number;
+  distanceMeters: number;
+};
+
+export type Deps = {
+  /** Tried in order; the public servers are often busy. */
+  overpassUrls: string[];
+  geocoderUrl: string;
+  userAgent: string;
+  fetchImpl: typeof fetch;
+};
+
+export const DEFAULT_OVERPASS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+];
+export const DEFAULT_GEOCODER = 'https://nominatim.openstreetmap.org';
+export const DEFAULT_USER_AGENT = 'SUTRA-traffic/1.0 (emergency service finder)';
+
+/** Per server. A driver is waiting on this, so give up quickly. */
+const TIMEOUT_MS = 12_000;
+
+/** What each chip means in OpenStreetMap, and what to call an unnamed one. */
+export const KINDS = {
+  hospital: { tag: 'amenity=hospital', label: 'Hospital' },
+  fire: { tag: 'amenity=fire_station', label: 'Fire station' },
+  police: { tag: 'amenity=police', label: 'Police station' },
+} as const;
+
+export type Kind = keyof typeof KINDS;
+
+/** Widened until something is found: a village may have nothing within 5 km. */
+export const RADII_M = [5_000, 15_000, 40_000];
+export const MAX_RESULTS = 5;
+
+type Point = [number, number]; // [lat, lng]
+
+/** Same planar approximation the database uses, so both agree on distances. */
+export function distanceM(a: Point, b: Point): number {
+  const dy = (b[0] - a[0]) * 110540;
+  const dx = (b[1] - a[1]) * 111320 * Math.cos((((a[0] + b[0]) / 2) * Math.PI) / 180);
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function json(body: unknown, status: number): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+function isLatLng(value: unknown): value is LatLng {
+  const p = value as LatLng | null;
+  return (
+    !!p &&
+    typeof p === 'object' &&
+    typeof p.latitude === 'number' &&
+    Number.isFinite(p.latitude) &&
+    p.latitude >= -90 &&
+    p.latitude <= 90 &&
+    typeof p.longitude === 'number' &&
+    Number.isFinite(p.longitude) &&
+    p.longitude >= -180 &&
+    p.longitude <= 180
+  );
+}
+
+type Element = {
+  type?: string;
+  lat?: number;
+  lon?: number;
+  center?: { lat?: number; lon?: number };
+  tags?: Record<string, string>;
+};
+
+/** A hospital is usually mapped as a building outline, so `out center` is required. */
+function toPlaces(elements: Element[], kind: Kind, near: LatLng): Place[] {
+  const origin: Point = [near.latitude, near.longitude];
+  return elements
+    .map((e) => {
+      const lat = typeof e.lat === 'number' ? e.lat : e.center?.lat;
+      const lng = typeof e.lon === 'number' ? e.lon : e.center?.lon;
+      if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+      return {
+        // An unnamed one is still somewhere to drive to.
+        name: e.tags?.name ?? e.tags?.['name:en'] ?? KINDS[kind].label,
+        latitude: lat,
+        longitude: lng,
+        distanceMeters: distanceM(origin, [lat, lng]),
+      };
+    })
+    .filter((p): p is Place => p !== null);
+}
+
+export function nearest(places: Place[], max = MAX_RESULTS): Place[] {
+  return [...places].sort((a, b) => a.distanceMeters - b.distanceMeters).slice(0, max);
+}
+
+/**
+ * Ask Overpass for this amenity around the driver, widening the search until
+ * something turns up. Returns null when every mirror failed, which is different
+ * from an empty array: nothing nearby is an answer, a dead server is not.
+ */
+async function findViaOverpass(
+  kind: Kind,
+  near: LatLng,
+  deps: Deps,
+): Promise<Place[] | null> {
+  const at = `${near.latitude.toFixed(6)},${near.longitude.toFixed(6)}`;
+  let reachedAServer = false;
+
+  for (const radius of RADII_M) {
+    const query =
+      `[out:json][timeout:20];` +
+      `nwr(around:${radius},${at})[${KINDS[kind].tag}];` +
+      `out center ${MAX_RESULTS * 12};`;
+
+    for (const url of deps.overpassUrls) {
+      try {
+        const response = await deps.fetchImpl(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            // overpass-api.de answers 406 to requests that do not ask for JSON.
+            Accept: 'application/json',
+            // Overpass, like Nominatim, asks clients to identify themselves.
+            'User-Agent': deps.userAgent,
+          },
+          body: `data=${encodeURIComponent(query)}`,
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+        });
+        if (!response.ok) {
+          console.error('[nearby] overpass', url, 'status', response.status);
+          continue;
+        }
+
+        const data = (await response.json()) as { elements?: Element[] };
+        reachedAServer = true;
+        const places = nearest(toPlaces(data.elements ?? [], kind, near));
+        // Found something: stop widening and stop trying mirrors.
+        if (places.length > 0) return places;
+        // Empty at this radius: widen rather than ask the next mirror the
+        // same question it just answered.
+        break;
+      } catch (e) {
+        console.error('[nearby] overpass', url, 'failed:', (e as Error)?.message ?? e);
+      }
+    }
+  }
+
+  return reachedAServer ? [] : null;
+}
+
+/**
+ * Nominatim fallback. `bounded=1` is what makes this local: without it the
+ * viewbox is only a soft preference and a search for "hospital" happily
+ * returns one in another state.
+ */
+async function findViaGeocoder(kind: Kind, near: LatLng, deps: Deps): Promise<Place[] | null> {
+  // Roughly the widest Overpass radius, in degrees.
+  const pad = 0.4;
+  const url = new URL(`${deps.geocoderUrl}/search`);
+  url.searchParams.set('q', KINDS[kind].label);
+  url.searchParams.set('format', 'json');
+  url.searchParams.set('limit', '20');
+  url.searchParams.set('bounded', '1');
+  url.searchParams.set(
+    'viewbox',
+    `${near.longitude - pad},${near.latitude + pad},${near.longitude + pad},${near.latitude - pad}`,
+  );
+
+  try {
+    const response = await deps.fetchImpl(url.toString(), {
+      headers: { 'User-Agent': deps.userAgent, Accept: 'application/json' },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      console.error('[nearby] nominatim status', response.status);
+      return null;
+    }
+
+    const raw = (await response.json()) as
+      | { display_name?: string; name?: string; lat?: string; lon?: string }[]
+      | null;
+    if (!Array.isArray(raw)) return null;
+
+    const origin: Point = [near.latitude, near.longitude];
+    return nearest(
+      raw
+        .map((entry) => ({
+          name: entry.display_name ?? entry.name ?? KINDS[kind].label,
+          latitude: Number(entry.lat),
+          longitude: Number(entry.lon),
+        }))
+        .filter((p) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude))
+        .map((p) => ({ ...p, distanceMeters: distanceM(origin, [p.latitude, p.longitude]) })),
+    );
+  } catch (e) {
+    console.error('[nearby] nominatim failed:', (e as Error)?.message ?? e);
+    return null;
+  }
+}
+
+export async function handler(req: Request, deps: Deps): Promise<Response> {
+  let body: { kind?: unknown; near?: unknown };
+  try {
+    body = await req.json();
+  } catch {
+    return json({ error: 'Invalid JSON body.' }, 400);
+  }
+
+  if (typeof body.kind !== 'string' || !(body.kind in KINDS)) {
+    return json({ error: `kind must be one of: ${Object.keys(KINDS).join(', ')}.` }, 400);
+  }
+  if (!isLatLng(body.near)) {
+    return json({ error: 'near must be {latitude, longitude} within valid ranges.' }, 400);
+  }
+
+  const kind = body.kind as Kind;
+  const near = body.near;
+
+  const viaOverpass = await findViaOverpass(kind, near, deps);
+  if (viaOverpass && viaOverpass.length > 0) {
+    return json({ places: viaOverpass, source: 'overpass' }, 200);
+  }
+
+  const viaGeocoder = await findViaGeocoder(kind, near, deps);
+  if (viaGeocoder && viaGeocoder.length > 0) {
+    return json({ places: viaGeocoder, source: 'nominatim' }, 200);
+  }
+
+  // Overpass reached and genuinely empty, and the geocoder added nothing:
+  // there really is no such service mapped near this driver.
+  if (viaOverpass) return json({ places: [], source: 'overpass' }, 200);
+
+  return json({ error: `Could not look up the nearest ${KINDS[kind].label.toLowerCase()}.` }, 502);
+}
