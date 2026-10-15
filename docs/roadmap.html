@@ -498,9 +498,10 @@
       violation pins and a density view.</li>
     <li>A driver-facing history screen: recent trips, distance, top speed, own
       violations. Row-level security already permits exactly this.</li>
-    <li><strong>A bug to fix on the way:</strong> the console subscribes to
-      violation inserts, but that table is not in the Realtime publication — so
-      that handler has never once fired.</li>
+    <li><strike>A bug to fix on the way: the console subscribes to violation
+      inserts, but that table is not in the Realtime publication.</strike>
+      Fixed on 15 October, pulled forward because the console was not updating
+      live at all — see below.</li>
   </ul>
 </div>
 
@@ -624,6 +625,43 @@
     reconnect, capped so it cannot grow without bound. Because the live position
     is a single upserted row, the queue mainly serves history continuity — a
     naive flush would replay stale positions as though they were current.
+  </p>
+</div>
+
+<h2>Fixed along the way</h2>
+
+<div class="phase">
+  <div class="phase-head">
+    <span class="phase-no">15 OCT</span>
+    <h3>The console stopped updating until reloaded</h3>
+    <span class="tag bug">Bug</span>
+    <span class="tag done">Fixed</span>
+  </div>
+  <p>
+    Reported from real use: the operator console had to be refreshed again and
+    again. Three separate causes, none of them the one first suspected — the
+    publication and the Realtime service both turned out to be healthy, and a
+    probe showed an unpublished table does <em>not</em> break a channel.
+  </p>
+  <ul>
+    <li><strong>Nothing ever rejoined.</strong> The subscribe callback set the
+      indicator to "disconnected" and stopped there. A slept laptop, a tunnel
+      or a changed network ended the stream permanently, and reloading the page
+      was the only cure.</li>
+    <li><strong>Realtime kept an expired token.</strong> The sign-in token
+      lasts an hour. Nothing passed the refreshed one on, so Realtime went on
+      authorizing rows against a dead token while the socket stayed open — the
+      console looked connected and silently showed nothing.</li>
+    <li><strong>Violations were never published.</strong> That handler had
+      never fired once.</li>
+  </ul>
+  <p>
+    Now: automatic rejoin with backoff, the refreshed token handed to Realtime,
+    a re-read of live positions after every reconnect and when the tab regains
+    focus, and — the part that matters most — a <strong>15-second
+    reconciliation regardless of Realtime</strong>. Realtime is the fast path,
+    not the only one, so a stream that silently dies costs seconds of staleness
+    rather than a reload.
   </p>
 </div>
 

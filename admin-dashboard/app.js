@@ -17,6 +17,10 @@ const CONFIG = window.SUTRA_CONFIG || {};
 const MAP_STYLE = 'https://tiles.openfreemap.org/styles/dark';
 const STALE_AFTER_MS = 30_000;
 const MAX_LOG_ITEMS = 150;
+/** Safety net: how often the live positions are re-read regardless of Realtime. */
+const RECONCILE_MS = 15_000;
+const REJOIN_BASE_MS = 2_000;
+const REJOIN_MAX_MS = 30_000;
 const HISTORY_DAYS = 7;
 
 const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
@@ -209,7 +213,18 @@ $('gate-reset').addEventListener('click', async () => {
  * Supabase returns from a reset link with a recovery session already active, so
  * the only thing left is to collect a new password.
  */
-supabase.auth.onAuthStateChange(async (event) => {
+supabase.auth.onAuthStateChange(async (event, session) => {
+  // Realtime authorizes each row against the token it holds. Without this it
+  // keeps the one from sign-in, which expires after an hour - and then the
+  // socket stays open while postgres_changes quietly stop arriving.
+  if ((event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN') && session?.access_token) {
+    try {
+      await supabase.realtime.setAuth(session.access_token);
+    } catch (e) {
+      console.warn('[sutra] could not refresh realtime auth', e);
+    }
+  }
+
   if (event !== 'PASSWORD_RECOVERY') return;
 
   const next = window.prompt('Enter a new password (at least 6 characters)');
@@ -866,6 +881,10 @@ const SIGNAL_LABEL = { WAITING: 'red', PREEMPT: 'clearing', GREEN: 'green', PASS
 // PostgREST caps a response at 1,000 rows; a long route has more points.
 const PAGE = 1000;
 
+state.channelState = 'idle';
+state.rejoinAttempt = 0;
+state.rejoinTimer = null;
+state.lastReconcileAt = 0;
 state.corridors = new Map(); // corridor id -> { corridor, route, signals, markers, warned }
 
 async function fetchRoutePoints(corridorId) {
@@ -1237,16 +1256,97 @@ async function startConsole() {
     );
   }
 
-  // Backfill so a console opened mid-shift is not blank until the next frame.
-  const { data, error } = await supabase.from('vehicle_positions').select('*');
-  if (error) logEvent('violation', 'Could not load fleet', error.message);
-  else (data ?? []).forEach(applyPosition);
-
-  renderFleet();
-  loadViolationCount();
+  await reconcile();
   loadCorridors();
+  subscribeToFleet();
 
+  // Realtime is the fast path, not the only one. A laptop that slept, a tunnel,
+  // or an expired token all leave a socket that looks connected and delivers
+  // nothing, and the operator cannot tell the difference. Re-reading the live
+  // positions on a timer means the map is correct within seconds either way,
+  // instead of needing the page reloaded.
+  setInterval(() => {
+    if (document.visibilityState === 'visible') reconcile();
+  }, RECONCILE_MS);
+
+  // Coming back to the tab is the moment an operator most needs it to be right.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    reconcile();
+    if (state.channelState !== 'joined') subscribeToFleet();
+  });
+
+  // A vehicle that stops streaming leaves its last row behind, so staleness is
+  // re-rendered on a timer rather than waiting for an event that never arrives.
+  setInterval(() => {
+    renderFleet();
+    state.fleet.forEach(refreshMarker);
+    if (state.selectedId) renderDetail();
+  }, 5_000);
+}
+
+/**
+ * Re-read what the console should be showing. Cheap: one row per vehicle.
+ *
+ * Also run after every successful (re)subscribe, because anything that changed
+ * while the socket was down produced no event and would otherwise be missed
+ * until that vehicle happened to move again.
+ */
+async function reconcile() {
+  const { data, error } = await supabase.from('vehicle_positions').select('*');
+  if (error) {
+    setConnection('cannot reach the server', false);
+    return;
+  }
+
+  const live = new Set();
+  (data ?? []).forEach((position) => {
+    live.add(position.vehicle_id);
+    applyPosition(position);
+  });
+
+  // A vehicle whose row was deleted while we were not listening.
+  state.fleet.forEach((entry, id) => {
+    if (live.has(id)) return;
+    entry.marker?.remove();
+    state.fleet.delete(id);
+    if (state.selectedId === id) state.selectedId = null;
+  });
+
+  state.lastReconcileAt = Date.now();
+  renderFleet();
+  renderDetail();
+  loadViolationCount();
+}
+
+/** Rejoin after a drop, backing off so a server having a bad minute is not hammered. */
+function scheduleRejoin() {
+  if (state.rejoinTimer) return;
+  state.rejoinAttempt = Math.min(state.rejoinAttempt + 1, 6);
+  const delay = backoffDelayMs(state.rejoinAttempt);
+  setConnection(`reconnecting in ${Math.round(delay / 1000)}s`, false);
+
+  state.rejoinTimer = setTimeout(() => {
+    state.rejoinTimer = null;
+    subscribeToFleet();
+  }, delay);
+}
+
+/** 2s, 4s, 8s … 30s, plus jitter so many consoles do not retry in lockstep. */
+function backoffDelayMs(attempt, random = Math.random) {
+  const base = Math.min(REJOIN_BASE_MS * 2 ** (attempt - 1), REJOIN_MAX_MS);
+  return Math.round(base * (0.8 + random() * 0.4));
+}
+
+function subscribeToFleet() {
+  if (state.rejoinTimer) {
+    clearTimeout(state.rejoinTimer);
+    state.rejoinTimer = null;
+  }
+  // One channel at a time; a stale one keeps its own retry loop otherwise.
   supabase.getChannels().forEach((channel) => supabase.removeChannel(channel));
+  state.channelState = 'joining';
+  setConnection('connecting', false);
 
   state.channel = supabase
     .channel('sutra-fleet')
@@ -1285,19 +1385,25 @@ async function startConsole() {
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'corridor_signals' }, onSignalChange)
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'corridor_warnings' }, onWarning)
     .subscribe((status) => {
-      if (status === 'SUBSCRIBED') setConnection('live', true);
-      else if (status === 'CHANNEL_ERROR') setConnection('connection error', false);
-      else if (status === 'CLOSED') setConnection('disconnected', false);
-      else setConnection(status.toLowerCase(), false);
-    });
+      if (status === 'SUBSCRIBED') {
+        state.channelState = 'joined';
+        state.rejoinAttempt = 0;
+        setConnection('live', true);
+        // Anything that changed while we were away produced no event.
+        reconcile();
+        return;
+      }
 
-  // A vehicle that stops streaming leaves its last row behind, so staleness is
-  // re-rendered on a timer rather than waiting for an event that never arrives.
-  setInterval(() => {
-    renderFleet();
-    state.fleet.forEach(refreshMarker);
-    if (state.selectedId) renderDetail();
-  }, 5_000);
+      state.channelState = 'dropped';
+      // CLOSED and TIMED_OUT are ordinary on a laptop that slept or a phone
+      // that changed network. Previously nothing rejoined, so the only cure
+      // was reloading the page.
+      if (status === 'CHANNEL_ERROR' || status === 'CLOSED' || status === 'TIMED_OUT') {
+        scheduleRejoin();
+      } else {
+        setConnection(status.toLowerCase(), false);
+      }
+    });
 }
 
 // Resume an existing session so a refresh does not force another sign-in.

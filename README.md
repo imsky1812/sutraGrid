@@ -382,6 +382,11 @@ Things that cost real time here and are worth knowing:
 - **`org.gradle.workers.max` does not reach ninja.** Local native builds need
   `CMAKE_BUILD_PARALLEL_LEVEL`, which is what `npm run apk` sets. Without it,
   clang dies with `LLVM ERROR: out of memory` on a machine with little free RAM.
+- **A Realtime channel that drops is not coming back on its own,** and the
+  socket stays open looking healthy. The console now rejoins with backoff,
+  hands Realtime each refreshed token (they expire hourly, after which rows are
+  silently withheld), and re-reads positions every 15 seconds regardless.
+  Treat Realtime as the fast path, never as the only one.
 - **The `hidden` attribute is only `display: none` in the UA stylesheet.** Any
   author `display` rule beats it, which silently broke the dashboard's sign-in
   gate: login succeeded and the console rendered underneath it.
