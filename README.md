@@ -379,6 +379,19 @@ difference, and row-level security applies exactly as it would to a driver.
 Plates all begin `SIM `, and Ctrl-C deletes them. `--cleanup` removes
 leftovers from an interrupted run.
 
+## Trips and replay
+
+`vehicle_trips()` groups `position_history` into journeys, built from **moving
+points only** (above walking pace), split where movement stops for more than
+five minutes. Summing every recorded point would count a parked phone's GPS
+wobble as distance: an hour parked became kilometres "driven". It runs as the
+caller, so row-level security decides whose trips come back.
+
+The console's Insights lists a vehicle's trips; any of them replays on the map
+with a moving marker, the speed at each moment, and a pin wherever a rule was
+broken. *Speeding map* draws a heatmap of the last 30 days weighted by how far
+over the limit. Drivers see their own week under *Trips and history*.
+
 ## Roadmap
 
 `docs/roadmap.html`, and the same thing as `docs/SUTRA-roadmap.pdf`: the

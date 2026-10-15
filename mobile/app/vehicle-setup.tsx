@@ -178,6 +178,20 @@ export default function VehicleSetup() {
                     <Text style={styles.vehicleGlyph}>{TYPE_GLYPH[item.vehicle_type] ?? '🚗'}</Text>
                   </View>
 
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Trips and history for ${item.vehicle_number}`}
+                    onPress={() =>
+                      router.push({
+                        pathname: '/history',
+                        params: { vehicleId: item.id, plate: item.vehicle_number },
+                      })
+                    }
+                    style={styles.historyLink}
+                  >
+                    <Text style={styles.historyText}>Trips and history ›</Text>
+                  </Pressable>
+
                   <View style={styles.vehicleBottom}>
                     <Text style={type.caption}>START SHIFT</Text>
                     <AccentAction
@@ -224,6 +238,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   signOutGlyph: { color: color.muted, fontSize: 16 },
+  historyLink: { alignSelf: 'flex-start', paddingVertical: space.xs },
+  historyText: { color: color.accent, fontSize: 13, fontWeight: '700' },
 
   list: { paddingHorizontal: space.xl, paddingBottom: space.lg, gap: space.md },
   empty: { gap: space.sm },

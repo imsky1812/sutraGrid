@@ -12,6 +12,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.112.3';
 import maplibregl from 'https://esm.sh/maplibre-gl@5.6.1';
+import { formatDuration, positionAt } from './replay-math.js';
 
 const CONFIG = window.SUTRA_CONFIG || {};
 const MAP_STYLE = 'https://tiles.openfreemap.org/styles/dark';
@@ -565,47 +566,42 @@ function describeViolation(v) {
       (seconds ? ` for ${seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)} min`}` : ', still open'),
     where: `${Number(v.lat).toFixed(4)}, ${Number(v.lng).toFixed(4)}`,
     peak: `${Number(v.speed).toFixed(0)} km/h`,
+    headline: `Peak ${Number(v.speed).toFixed(0)} km/h`,
   };
 }
 
 async function openInsights(vehicleId) {
   const entry = state.fleet.get(vehicleId);
-  drawerShell(entry ? `${plate(entry)} · last ${HISTORY_DAYS} days` : `Last ${HISTORY_DAYS} days`);
+  const title = entry ? `${plate(entry)} · last ${HISTORY_DAYS} days` : `Last ${HISTORY_DAYS} days`;
+  drawerShell(title);
   drawer.appendChild(el('p', { className: 'muted', text: 'Loading…' }));
 
   const since = new Date(Date.now() - HISTORY_DAYS * 86_400_000).toISOString();
 
-  const [historyRes, violationRes] = await Promise.all([
-    supabase
-      .from('position_history')
-      .select('lat, lng, speed, recorded_at')
-      .eq('vehicle_id', vehicleId)
-      .gte('recorded_at', since)
-      .order('recorded_at', { ascending: true })
-      .limit(5000),
+  const [tripRes, violationRes] = await Promise.all([
+    supabase.rpc('vehicle_trips', { p_vehicle_id: vehicleId, p_days: HISTORY_DAYS }),
     supabase
       .from('violations')
-      .select('speed, speed_limit, lat, lng, occurred_at, cleared_at')
+      .select('kind, speed, speed_limit, lat, lng, occurred_at, cleared_at')
       .eq('vehicle_id', vehicleId)
       .gte('occurred_at', since)
       .order('occurred_at', { ascending: false }),
   ]);
 
-  drawerShell(entry ? `${plate(entry)} · last ${HISTORY_DAYS} days` : `Last ${HISTORY_DAYS} days`);
+  drawerShell(title);
 
-  if (historyRes.error) {
-    drawer.appendChild(el('p', { className: 'error', text: historyRes.error.message }));
+  if (tripRes.error) {
+    drawer.appendChild(el('p', { className: 'error', text: tripRes.error.message }));
     return;
   }
 
-  const points = historyRes.data ?? [];
+  const trips = tripRes.data ?? [];
   const violations = violationRes.data ?? [];
 
-  // Distance from the track itself rather than a stored odometer, so it stays
-  // honest about what was actually recorded.
-  let metres = 0;
-  for (let i = 1; i < points.length; i++) metres += haversine(points[i - 1], points[i]);
-  const topSpeed = points.reduce((m, p) => Math.max(m, Number(p.speed) || 0), 0);
+  // From trips, which are built from moving points only. Summing every
+  // recorded point counted a parked phone's GPS wobble as kilometres driven.
+  const metres = trips.reduce((m, t) => m + Number(t.distance_m), 0);
+  const topSpeed = trips.reduce((m, t) => Math.max(m, Number(t.top_speed) || 0), 0);
 
   drawer.appendChild(
     el('div', { className: 'summary-row' }, [
@@ -624,17 +620,36 @@ async function openInsights(vehicleId) {
     ]),
   );
 
-  if (points.length > 1) {
-    const showBtn = el('button', { className: 'btn accent', text: 'Show track on map' });
-    showBtn.addEventListener('click', () => {
-      drawTrack(points);
-      closeDrawer();
-    });
-    drawer.appendChild(showBtn);
-  } else {
+  drawer.appendChild(el('small', { className: 'muted', text: 'TRIPS · TAP TO REPLAY' }));
+
+  if (trips.length === 0) {
     drawer.appendChild(
-      el('p', { className: 'muted', text: 'No recorded positions in this window yet.' }),
+      el('p', {
+        className: 'muted',
+        text: 'No trips in this window. Time spent parked is not counted as driving.',
+      }),
     );
+  } else {
+    trips.forEach((trip) => {
+      const started = new Date(trip.started_at);
+      const row = el('button', { className: 'trip-row' }, [
+        el('span', {
+          className: 'when',
+          text: started.toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }),
+        }),
+        el('span', {
+          className: 'trip-stats',
+          text: `${(Number(trip.distance_m) / 1000).toFixed(1)} km · ${formatDuration(
+            new Date(trip.ended_at) - started,
+          )} · top ${Number(trip.top_speed).toFixed(0)} km/h`,
+        }),
+        trip.violations > 0
+          ? el('span', { className: 'tag over', text: `${trip.violations} rule break${trip.violations === 1 ? '' : 's'}` })
+          : el('span', { className: 'tag', text: 'clean' }),
+      ]);
+      row.addEventListener('click', () => startReplay(vehicleId, trip));
+      drawer.appendChild(row);
+    });
   }
 
   drawer.appendChild(el('small', { className: 'muted', text: 'RULE BREAKS' }));
@@ -647,7 +662,7 @@ async function openInsights(vehicleId) {
       drawer.appendChild(
         el('div', { className: 'violation-item' }, [
           el('span', { className: 'when', text: d.when }),
-          el('span', { className: 'peak', text: `Peak ${d.peak}` }),
+          el('span', { className: 'peak', text: d.headline }),
           el('span', { className: 'why', text: d.why }),
           el('span', { className: 'why', text: `at ${d.where}` }),
         ]),
@@ -656,16 +671,6 @@ async function openInsights(vehicleId) {
   }
 }
 
-function haversine(a, b) {
-  const R = 6371000;
-  const toRad = (d) => (d * Math.PI) / 180;
-  const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
-  const s =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(s));
-}
 
 // ---------------------------------------------------------------------------
 // Alert composer (operators only)
@@ -1234,6 +1239,291 @@ async function openVehicleAdmin() {
 }
 
 $('open-vehicles').addEventListener('click', openVehicleAdmin);
+
+// ---------------------------------------------------------------------------
+// Trips and replay
+//
+// A trip is a run of moving points with no gap longer than five minutes; the
+// database works that out (vehicle_trips) so a parked phone's GPS wobble is
+// never counted as distance. Replay then plays one trip back on the map with
+// its violations pinned where they happened.
+// ---------------------------------------------------------------------------
+
+/** One request's worth. PostgREST caps responses at 1000 rows by default. */
+const HISTORY_PAGE = 1000;
+/** About five and a half hours at one point a second. Enough for any shift. */
+const MAX_REPLAY_POINTS = 20_000;
+const REPLAY_RATES = [1, 10, 60];
+
+state.replay = null;
+
+function formatClock(date) {
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+/** Every point of one trip, oldest first, fetched a page at a time. */
+async function fetchTripPoints(vehicleId, from, to) {
+  const points = [];
+  for (let offset = 0; offset < MAX_REPLAY_POINTS; offset += HISTORY_PAGE) {
+    const { data, error } = await supabase
+      .from('position_history')
+      .select('lat, lng, speed, heading, recorded_at')
+      .eq('vehicle_id', vehicleId)
+      .gte('recorded_at', from)
+      .lte('recorded_at', to)
+      .order('recorded_at', { ascending: true })
+      .range(offset, offset + HISTORY_PAGE - 1);
+    if (error) throw new Error(error.message);
+    points.push(...(data ?? []));
+    if (!data || data.length < HISTORY_PAGE) break;
+  }
+  return points.map((p) => ({ ...p, t: new Date(p.recorded_at).getTime() }));
+}
+
+function stopReplay() {
+  const r = state.replay;
+  if (!r) return;
+  cancelAnimationFrame(r.frame);
+  r.marker?.remove();
+  r.pins.forEach((pin) => pin.remove());
+  state.replay = null;
+  const bar = $('replay');
+  bar.hidden = true;
+  clear(bar);
+  drawTrack([]);
+}
+
+function renderReplayFrame() {
+  const r = state.replay;
+  if (!r) return;
+  const here = positionAt(r.points, r.t);
+  r.marker.setLngLat([here.lng, here.lat]);
+  r.clock.textContent = formatClock(new Date(r.t));
+  r.speed.textContent = `${Math.round(here.speed)} km/h`;
+  r.speed.classList.toggle('over', here.speed > state.speedLimit);
+  r.slider.value = String(Math.round(r.t - r.points[0].t));
+}
+
+function tick(now) {
+  const r = state.replay;
+  if (!r || !r.playing) return;
+  const elapsed = r.lastFrame ? now - r.lastFrame : 0;
+  r.lastFrame = now;
+  r.t = Math.min(r.t + elapsed * r.rate, r.points[r.points.length - 1].t);
+  renderReplayFrame();
+
+  if (r.t >= r.points[r.points.length - 1].t) {
+    r.playing = false;
+    r.play.textContent = '▶';
+    return;
+  }
+  r.frame = requestAnimationFrame(tick);
+}
+
+function setPlaying(playing) {
+  const r = state.replay;
+  if (!r) return;
+  // Pressing play at the end starts again rather than doing nothing.
+  if (playing && r.t >= r.points[r.points.length - 1].t) r.t = r.points[0].t;
+  r.playing = playing;
+  r.lastFrame = 0;
+  r.play.textContent = playing ? '❚❚' : '▶';
+  cancelAnimationFrame(r.frame);
+  if (playing) r.frame = requestAnimationFrame(tick);
+}
+
+async function startReplay(vehicleId, trip) {
+  stopReplay();
+  closeDrawer();
+  const bar = $('replay');
+  bar.hidden = false;
+  clear(bar);
+  bar.appendChild(el('span', { className: 'muted', text: 'Loading trip…' }));
+
+  let points;
+  let violations;
+  try {
+    [points, violations] = await Promise.all([
+      fetchTripPoints(vehicleId, trip.started_at, trip.ended_at),
+      supabase
+        .from('violations')
+        .select('kind, speed, speed_limit, lat, lng, occurred_at, cleared_at')
+        .eq('vehicle_id', vehicleId)
+        .gte('occurred_at', trip.started_at)
+        .lte('occurred_at', trip.ended_at)
+        .then(({ data, error }) => {
+          if (error) throw new Error(error.message);
+          return data ?? [];
+        }),
+    ]);
+  } catch (e) {
+    clear(bar);
+    bar.appendChild(el('span', { className: 'error', text: e.message }));
+    return;
+  }
+
+  if (points.length < 2) {
+    clear(bar);
+    bar.appendChild(el('span', { className: 'muted', text: 'Not enough recorded points to replay.' }));
+    return;
+  }
+
+  drawTrack(points);
+
+  // Where each rule was broken, so the replay can be read at a glance.
+  const pins = violations.map((v) => {
+    const pin = el('div', { className: 'violation-pin', title: describeViolation(v).why });
+    return new maplibregl.Marker({ element: pin }).setLngLat([v.lng, v.lat]).addTo(state.map);
+  });
+
+  const dot = el('div', { className: 'replay-dot' });
+  const marker = new maplibregl.Marker({ element: dot })
+    .setLngLat([points[0].lng, points[0].lat])
+    .addTo(state.map);
+
+  clear(bar);
+  const play = el('button', { className: 'icon-btn', text: '▶', title: 'Play or pause' });
+  const slider = el('input', { className: 'replay-slider' });
+  slider.type = 'range';
+  slider.min = '0';
+  slider.max = String(points[points.length - 1].t - points[0].t);
+  slider.value = '0';
+  const clock = el('span', { className: 'replay-clock' });
+  const speed = el('span', { className: 'replay-speed' });
+  const rate = el('select', { className: 'field-sm' });
+  REPLAY_RATES.forEach((n) => {
+    const option = el('option', { text: `${n}×` });
+    option.value = String(n);
+    rate.appendChild(option);
+  });
+  rate.value = '10';
+  const close = el('button', { className: 'icon-btn', text: '✕', title: 'Close replay' });
+
+  state.replay = {
+    points,
+    pins,
+    marker,
+    t: points[0].t,
+    rate: 10,
+    playing: false,
+    frame: 0,
+    lastFrame: 0,
+    play,
+    slider,
+    clock,
+    speed,
+  };
+
+  play.addEventListener('click', () => setPlaying(!state.replay.playing));
+  slider.addEventListener('input', () => {
+    state.replay.t = points[0].t + Number(slider.value);
+    renderReplayFrame();
+  });
+  rate.addEventListener('change', () => {
+    state.replay.rate = Number(rate.value);
+  });
+  close.addEventListener('click', stopReplay);
+
+  bar.appendChild(play);
+  bar.appendChild(slider);
+  bar.appendChild(el('div', { className: 'replay-readout' }, [clock, speed]));
+  bar.appendChild(rate);
+  bar.appendChild(close);
+  bar.appendChild(
+    el('small', {
+      className: 'muted replay-caption',
+      text: `${new Date(trip.started_at).toLocaleString([], {
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+      })} · ${(trip.distance_m / 1000).toFixed(1)} km · ${violations.length} violation${violations.length === 1 ? '' : 's'}`,
+    }),
+  );
+
+  renderReplayFrame();
+  setPlaying(true);
+}
+
+// ---------------------------------------------------------------------------
+// Speeding heatmap
+//
+// Where rules are broken across the fleet, weighted by how far over the limit.
+// Row-level security scopes it: an operator sees the fleet, a driver their own.
+// ---------------------------------------------------------------------------
+
+const HEATMAP_DAYS = 30;
+
+async function toggleHeatmap() {
+  const button = $('toggle-heatmap');
+  const map = state.map;
+  if (!map) return;
+
+  if (map.getLayer('violation-heat')) {
+    map.removeLayer('violation-heat');
+    map.removeSource('violation-heat');
+    button.classList.remove('accent');
+    return;
+  }
+
+  button.disabled = true;
+  const since = new Date(Date.now() - HEATMAP_DAYS * 86_400_000).toISOString();
+  const { data, error } = await supabase
+    .from('violations')
+    .select('lat, lng, speed, speed_limit, kind')
+    .gte('occurred_at', since)
+    .limit(5000);
+  button.disabled = false;
+
+  if (error) {
+    logEvent('violation', 'Could not load the speeding map', error.message);
+    return;
+  }
+
+  map.addSource('violation-heat', {
+    type: 'geojson',
+    data: {
+      type: 'FeatureCollection',
+      features: (data ?? []).map((v) => ({
+        type: 'Feature',
+        properties: {
+          // How far over, so one 140 km/h run outweighs ten at 82.
+          weight: Math.min(Math.max((Number(v.speed) - Number(v.speed_limit)) / 40, 0.15), 1),
+        },
+        geometry: { type: 'Point', coordinates: [v.lng, v.lat] },
+      })),
+    },
+  });
+  map.addLayer({
+    id: 'violation-heat',
+    type: 'heatmap',
+    source: 'violation-heat',
+    paint: {
+      'heatmap-weight': ['get', 'weight'],
+      'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 9, 12, 15, 30],
+      'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 9, 0.8, 15, 2],
+      'heatmap-color': [
+        'interpolate',
+        ['linear'],
+        ['heatmap-density'],
+        0, 'rgba(0,0,0,0)',
+        0.2, 'rgba(245,182,59,0.45)',
+        0.6, 'rgba(255,107,90,0.75)',
+        1, 'rgba(255,60,40,0.95)',
+      ],
+      'heatmap-opacity': 0.85,
+    },
+  });
+  button.classList.add('accent');
+  logEvent(
+    'violation',
+    'Speeding map',
+    `${data?.length ?? 0} rule break${data?.length === 1 ? '' : 's'} in the last ${HEATMAP_DAYS} days`,
+  );
+}
+
+$('toggle-heatmap').addEventListener('click', toggleHeatmap);
 
 async function startConsole() {
   // The map is the most fragile part of the console: MapLibre needs WebGL, and

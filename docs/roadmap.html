@@ -266,7 +266,7 @@
   <tr><td>3</td><td>Vehicle simulator</td><td><span class="tag done">Done · 15 Oct</span></td></tr>
   <tr><td>4</td><td>Real-device demo run</td><td><span class="tag high">High</span></td></tr>
   <tr><td>5</td><td>Push to a closed app (FCM)</td><td><span class="tag done">Built · 15 Oct</span> <span class="tag med">Needs Firebase</span></td></tr>
-  <tr><td>6</td><td>Trip replay + violations view</td><td><span class="tag high">High</span></td></tr>
+  <tr><td>6</td><td>Trip replay + violations view</td><td><span class="tag done">Done · 16 Oct</span></td></tr>
   <tr><td>7</td><td>Collision / near-miss warning</td><td><span class="tag med">Medium</span></td></tr>
   <tr><td>8</td><td>Richer violation types</td><td><span class="tag med">Medium</span></td></tr>
   <tr><td>9</td><td>Geofencing + event engine</td><td><span class="tag med">Medium</span></td></tr>
@@ -521,8 +521,26 @@
   <div class="phase-head">
     <span class="phase-no">PHASE 6</span>
     <h3>Trip replay and violations</h3>
-    <span class="tag high">High — cheap, demos well</span>
+    <span class="tag done">Done · 16 Oct</span>
   </div>
+  <div class="callout">
+    <p>
+      <strong>Built from moving points only.</strong> A parked phone keeps
+      streaming and GPS wanders a few metres per fix, so summing every point
+      turned an hour parked into kilometres "driven" — a flaw the console's
+      Insights already had. <code>vehicle_trips()</code> drops points below
+      walking pace, which also splits trips at stops for free. On the live
+      project it found one genuine 247 m trip and correctly ignored hours of
+      stationary streaming from the same day.
+    </p>
+  </div>
+  <p><strong>Shipped:</strong> a trip list in the console's Insights that opens
+    a replay — play, pause, scrub, 1×/10×/60× — with a moving marker, live
+    speed (red over the limit) and a pin wherever a rule was broken; a
+    <em>Speeding map</em> heatmap weighted by how far over the limit; and a
+    <em>Trips and history</em> screen in the app. Points are fetched a page at
+    a time, so a long trip is not cut off at PostgREST's 1000-row default. 11
+    database tests, 6 for the replay arithmetic, 12 in the app.</p>
   <ul>
     <li>A replay scrubber over a vehicle's stored track in the console, with
       violation pins and a density view.</li>

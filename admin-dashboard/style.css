@@ -347,3 +347,37 @@ textarea.field-sm { resize: vertical; min-height: 76px; }
   white-space: nowrap;
 }
 .tag.granted { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
+
+/* Trips and replay */
+.trip-row {
+  display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: center;
+  text-align: left; width: 100%; cursor: pointer; font-family: inherit; color: var(--ink);
+  background: var(--surface-high); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px;
+}
+.trip-row:hover, .trip-row:focus-visible { border-color: var(--accent); outline: none; }
+.trip-row .when { font-weight: 700; font-size: 13px; }
+.trip-row .trip-stats { color: var(--muted); font-size: 12px; grid-column: 1 / -1; }
+.trip-row .tag { justify-self: end; grid-row: 1; grid-column: 2; }
+.tag.over { color: var(--danger); border-color: var(--danger); }
+
+.replay-bar {
+  position: absolute; left: 16px; right: 16px; bottom: 16px; z-index: 5;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 18px;
+  padding: 10px 14px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+.replay-slider { flex: 1; min-width: 140px; accent-color: var(--accent); }
+.replay-readout { display: flex; flex-direction: column; min-width: 86px; font-variant-numeric: tabular-nums; }
+.replay-clock { font-size: 13px; font-weight: 700; }
+.replay-speed { font-size: 12px; color: var(--muted); }
+.replay-speed.over { color: var(--danger); font-weight: 700; }
+.replay-caption { flex-basis: 100%; }
+.replay-dot {
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--accent); border: 3px solid var(--on-accent);
+  box-shadow: 0 0 0 4px var(--accent-ghost);
+}
+.violation-pin {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--danger); border: 2px solid var(--on-accent); cursor: help;
+}

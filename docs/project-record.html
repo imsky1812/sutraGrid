@@ -290,7 +290,7 @@
 
   <main>
     <header class="doc-head">
-      <div class="eyebrow">Project record · as of 15 October 2026</div>
+      <div class="eyebrow">Project record · as of 16 October 2026</div>
       <h1>SUTRA: live vehicle telemetry and green corridors</h1>
       <p class="lede">An Android app streams each vehicle's position to Supabase. A web console lets traffic control watch the fleet and send alerts, and authorized emergency vehicles can open a green corridor that warns drivers ahead to give way.</p>
       <div class="meta">
@@ -355,6 +355,7 @@ flowchart LR
         <li><time>15 Oct</time><div><b>A simulated fleet</b><p>Vehicles that behave like phones, so the system can be demonstrated without one device per vehicle. Each registers a real vehicle and reports through the same client the app uses, so triggers, violations, corridor warnings and the radar all treat them as ordinary traffic, and row-level security applies as it would to any driver. One can be made to speed, which is the quickest way to show an automatic alert arriving.</p></div></li>
         <li><time>15 Oct</time><div><b>The console now recovers by itself</b><p>Reported from real use: the console had to be reloaded again and again. Nothing rejoined a dropped Realtime channel, the hourly token refresh was never passed to Realtime (so it kept authorizing against an expired one while the socket stayed open), and violations had never been published at all. It now rejoins with backoff, keeps Realtime's token current, and re-reads the live positions every 15 seconds regardless - Realtime is the fast path, not the only one.</p></div></li>
         <li><time>15 Oct</time><div><b>Push to a closed app</b><p>An alert insert now also calls a <code>notify</code> function, which pushes it through Expo to the phone in the addressed vehicle, so the give-way warning reaches a phone whose app has been swiped away. Pushes are sent at most once, never after the alert has expired, and collapse with the alert the open app raises itself. Verified live up to the push service; a notification on a real phone waits on a Firebase project.</p></div></li>
+        <li><time>16 Oct</time><div><b>Trips, replay and a speeding map</b><p>Recorded positions are now grouped into trips, built from moving points only - so a parked phone's GPS wobble no longer counts as distance, a flaw the console's "km driven" had. Operators can replay any trip with a moving marker and a pin wherever a rule was broken, and see a heatmap of where speeding happens. Drivers get a Trips and history screen showing their own week.</p></div></li>
         <li><time>22 Sep</time><div><b>Alerts, green corridor, layout</b><p>Beeping alerts and automatic overspeed warnings. The green corridor end to end. Internal database functions locked down. Keyboard and screen-edge alignment fixed across the app. This record added to the repository as <code>docs/project-record.html</code>, kept up to date with every change.</p></div></li>
       </ol>
     </section>
@@ -369,13 +370,14 @@ flowchart LR
         <li>One tap routes to the nearest hospital, fire station or police station, found around the driver in OpenStreetMap. Without a location fix the app refuses rather than guessing an origin.</li>
         <li><b>Around me:</b> a radar of nearby SUTRA vehicles, emergency ones in green and vehicles being told to give way ringed. Positions are interpolated between updates so the view moves rather than jumps. It states on screen that it sees only SUTRA vehicles, never other traffic or pedestrians.</li>
         <li>Alerts beep, vibrate and show a notification with no tap needed - and, once Firebase is configured, arrive as a push even when the app is closed. A phone that is open and also gets the push shows one notification, not two.</li>
+        <li>Trips and history: the driver's own last week - trips, distance, time driving, rule breaks.</li>
         <li>Crashes are captured and shown on the next launch.</li>
       </ul>
       <h3>Operator console</h3>
       <ul>
         <li>One interface for operators and drivers. Operators see the whole fleet; drivers see only their own vehicles. The database enforces this, not the browser.</li>
         <li>Live map and list with speed, plate, offline status; filters and sorting. Recovers on its own from a dropped connection, and re-reads positions every 15 seconds so a silently dead stream costs seconds rather than a reload.</li>
-        <li>A week of drive history and speeding insights: when, where and how fast.</li>
+        <li>A week of trips per vehicle, each replayable on the map at 1×, 10× or 60× with violations pinned where they happened, plus a heatmap of where speeding happens across the fleet.</li>
         <li>Send alerts to one vehicle or broadcast to all, with category and severity.</li>
         <li>Active green corridors with junction states and drivers warned.</li>
         <li><b>Vehicles screen:</b> grant or revoke emergency authorization and set the vehicle type for any registered vehicle. Operators only; every change is recorded against the operator who made it.</li>
