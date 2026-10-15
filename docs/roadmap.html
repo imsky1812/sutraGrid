@@ -265,7 +265,7 @@
   <tr><td>2</td><td>Live surroundings view — radar + map toggle</td><td><span class="tag done">Done · 15 Oct</span></td></tr>
   <tr><td>3</td><td>Vehicle simulator</td><td><span class="tag done">Done · 15 Oct</span></td></tr>
   <tr><td>4</td><td>Real-device demo run</td><td><span class="tag high">High</span></td></tr>
-  <tr><td>5</td><td>Push to a closed app (FCM)</td><td><span class="tag high">High</span></td></tr>
+  <tr><td>5</td><td>Push to a closed app (FCM)</td><td><span class="tag done">Built · 15 Oct</span> <span class="tag med">Needs Firebase</span></td></tr>
   <tr><td>6</td><td>Trip replay + violations view</td><td><span class="tag high">High</span></td></tr>
   <tr><td>7</td><td>Collision / near-miss warning</td><td><span class="tag med">Medium</span></td></tr>
   <tr><td>8</td><td>Richer violation types</td><td><span class="tag med">Medium</span></td></tr>
@@ -461,7 +461,8 @@
   <div class="phase-head">
     <span class="phase-no">PHASE 5</span>
     <h3>Push to a closed app</h3>
-    <span class="tag high">High — the main safety gap</span>
+    <span class="tag done">Built · 15 Oct</span>
+    <span class="tag med">Awaiting Firebase</span>
   </div>
   <p>
     Every notification today is <em>local</em>: an alert arrives over the open
@@ -485,6 +486,35 @@
       from the repository.
     </p>
   </div>
+  <h3>What shipped</h3>
+  <ul>
+    <li><code>notify</code> takes only an alert id. Recipients and text come
+      from <code>claim_alert_push</code>, which stamps <code>pushed_at</code>
+      first — so a replayed call sends nothing, and the function is safe behind
+      the public key.</li>
+    <li>Addressed alerts go to the phone in that vehicle, not every phone the
+      owner has. Expired alerts go nowhere, and each push lives only as long as
+      its alert: a late give-way warning is wrong, not merely late.</li>
+    <li>Push is sent even to open phones, because Realtime has died silently
+      before. The two arrivals collapse into one: both use the identifier
+      <code>sutra-alert-&lt;id&gt;</code>, which the library source confirms is
+      the Android tag for both a local notification and a push, so the second
+      replaces the first; and the app silences a push it has already sounded.</li>
+    <li>An alert can never fail to save because push could not be requested —
+      the trigger stands aside on any error, and is tested to.</li>
+    <li>Signing out withdraws the phone's token, so a shared phone stops
+      receiving the last driver's alerts.</li>
+  </ul>
+  <p><strong>Verified live:</strong> an alert insert travelled trigger →
+    <code>pg_net</code> → <code>notify</code> → claim and returned
+    <code>200</code>; a replay changed nothing; an unauthenticated call was
+    refused with <code>401</code>. The security advisor then caught
+    <code>pg_net</code> installed in <code>public</code>, which was moved to
+    <code>extensions</code> and the chain re-verified. The last step — a real
+    notification on a real phone — is blocked only on Firebase.</p>
+  <p><strong>Tests:</strong> 19 database tests, 20 for the function, 22 for
+    the app's registration and de-duplication. Push receipts (Expo's delivery
+    confirmation, checked minutes later) are not yet read.</p>
 </div>
 
 <div class="phase">

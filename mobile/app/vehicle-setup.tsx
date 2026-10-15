@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { listMyVehicles, registerVehicle, validateVehicleNumber, Vehicle } from '../src/vehicles';
 import { supabase } from '../src/supabase';
+import { forgetThisDevice } from '../src/push';
 import { AccentAction, Badge, Card, Field, Label, PillButton } from '../src/ui';
 import { color, radius, space, type } from '../src/theme';
 
@@ -88,6 +89,9 @@ export default function VehicleSetup() {
             accessibilityRole="button"
             accessibilityLabel="Sign out"
             onPress={async () => {
+              // While still signed in: the delete needs a session to prove
+              // the device is this driver's.
+              await forgetThisDevice();
               await supabase.auth.signOut();
               router.replace('/login');
             }}

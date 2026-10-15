@@ -3,9 +3,11 @@ import * as Notifications from 'expo-notifications';
 import {
   ALERT_CHANNEL,
   ALERT_SOUND,
+  alertTag,
   announceAlert,
   notificationFor,
   prepareAlertSound,
+  resetAnnounced,
 } from '../src/alertSound';
 import type { Alert } from '../src/alerts';
 
@@ -20,7 +22,13 @@ const alert = (over: Partial<Alert> = {}): Alert => ({
   ...over,
 });
 
-beforeEach(() => jest.clearAllMocks());
+// Registered once, at import. Captured before beforeEach clears the mock.
+const { handleNotification } = (Notifications.setNotificationHandler as jest.Mock).mock.calls[0][0];
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  resetAnnounced();
+});
 
 describe('notificationFor', () => {
   it('titles a congestion alert and carries the message as the body', () => {
@@ -92,5 +100,74 @@ describe('prepareAlertSound', () => {
   it('does not throw when the channel cannot be created', async () => {
     (Notifications.setNotificationChannelAsync as jest.Mock).mockRejectedValueOnce(new Error('x'));
     await expect(prepareAlertSound()).resolves.toBeUndefined();
+  });
+});
+
+// One alert can now arrive twice: over Realtime while the app runs, and as a
+// push, which is sent regardless because Realtime has been seen to die
+// silently. The driver must hear it once.
+describe('one alert, two routes', () => {
+  const pushed = (id: number) =>
+    ({ request: { identifier: alertTag(id), trigger: { type: 'push' }, content: {} } }) as never;
+
+  // Android replaces a shown notification with the same tag, and the server
+  // builds the same string. If these drift apart, the tray shows both.
+  it('tags the notification with the same id the server pushes under', async () => {
+    await announceAlert(alert({ id: 42 }));
+    expect(alertTag(42)).toBe('sutra-alert-42');
+    expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ identifier: 'sutra-alert-42' }),
+    );
+  });
+
+  it('does not sound the same alert twice over Realtime', async () => {
+    await announceAlert(alert({ id: 42 }));
+    await announceAlert(alert({ id: 42 }));
+    expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('silences a push for an alert the app already announced', async () => {
+    await announceAlert(alert({ id: 42 }));
+    const behaviour = await handleNotification(pushed(42));
+    expect(behaviour.shouldPlaySound).toBe(false);
+    expect(behaviour.shouldShowBanner).toBe(false);
+  });
+
+  it('lets a push through when the app had not heard of it', async () => {
+    const behaviour = await handleNotification(pushed(43));
+    expect(behaviour.shouldPlaySound).toBe(true);
+    expect(behaviour.shouldShowBanner).toBe(true);
+  });
+
+  // ...and then the same alert arriving over Realtime must stay quiet.
+  it('does not re-announce an alert that arrived first as a push', async () => {
+    await handleNotification(pushed(44));
+    await announceAlert(alert({ id: 44 }));
+    expect(Notifications.scheduleNotificationAsync).not.toHaveBeenCalled();
+  });
+
+  // A push that landed while the app was in the background never passed
+  // through the handler; it is only visible in the tray.
+  it('does not re-announce an alert already in the tray', async () => {
+    (Notifications.getPresentedNotificationsAsync as jest.Mock).mockResolvedValueOnce([
+      { request: { identifier: 'sutra-alert-45' } },
+    ]);
+    await announceAlert(alert({ id: 45 }));
+    expect(Notifications.scheduleNotificationAsync).not.toHaveBeenCalled();
+  });
+
+  // Not knowing what is in the tray is no reason to stay silent.
+  it('still announces if the tray cannot be read', async () => {
+    (Notifications.getPresentedNotificationsAsync as jest.Mock).mockRejectedValueOnce(new Error('x'));
+    await announceAlert(alert({ id: 46 }));
+    expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+  });
+
+  // The app's own local notification passes through the same handler, and
+  // must not be mistaken for a duplicate of itself.
+  it('never silences the app’s own notification', async () => {
+    await announceAlert(alert({ id: 47 }));
+    const local = { request: { identifier: alertTag(47), trigger: { channelId: ALERT_CHANNEL }, content: {} } };
+    expect((await handleNotification(local as never)).shouldPlaySound).toBe(true);
   });
 });

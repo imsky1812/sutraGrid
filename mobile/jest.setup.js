@@ -43,6 +43,10 @@ jest.mock('expo-notifications', () => ({
   getPermissionsAsync: jest.fn().mockResolvedValue({ granted: true }),
   requestPermissionsAsync: jest.fn().mockResolvedValue({ granted: true }),
   scheduleNotificationAsync: jest.fn().mockResolvedValue('id'),
+  getPresentedNotificationsAsync: jest.fn().mockResolvedValue([]),
+  getExpoPushTokenAsync: jest
+    .fn()
+    .mockResolvedValue({ type: 'expo', data: 'ExponentPushToken[testdevice0000001]' }),
 }));
 
 // Screens read the status-bar and navigation-bar heights from here. The

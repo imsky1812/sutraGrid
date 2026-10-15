@@ -34,3 +34,9 @@ mobile/.env
 
 # Staged copy of the dashboard for EAS Hosting
 mobile/dashboard-dist/
+
+# Firebase service-account keys are private credentials: they belong in EAS
+# (expo.dev > Credentials > FCM V1 service account key), never in the repo.
+# google-services.json is different - public identifiers - and may be committed.
+*firebase-adminsdk*.json
+*service-account*.json

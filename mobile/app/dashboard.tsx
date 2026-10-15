@@ -38,6 +38,7 @@ import {
   subscribeToAlerts,
 } from '../src/alerts';
 import { announceAlert, prepareAlertSound } from '../src/alertSound';
+import { registerForPush } from '../src/push';
 import {
   CORRIDOR_COLOR,
   CorridorPlan,
@@ -203,6 +204,10 @@ export default function Dashboard() {
         // Before telemetry, so the notification prompt comes up while the
         // driver is still looking at the screen rather than mid-drive.
         await prepareAlertSound();
+        // So an alert still reaches this phone once the app is closed. Not
+        // awaited: it is a network round trip the shift should not wait on,
+        // and it reports its own failures.
+        void registerForPush(found.id);
         await startTelemetry(found);
       } catch (e) {
         if (active) {

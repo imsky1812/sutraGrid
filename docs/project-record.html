@@ -309,7 +309,7 @@
         <div><span>Latest APK</span><code>sutra-vehicle-oct15.apk</code><br><small class="mono">EAS build ee5a8c2f · 15 Oct 2026</small></div>
         <div><span>Supabase project</span><code>ytqpjxpzhgintwpbujcy</code></div>
         <div><span>EAS project</span><code>@imsky1812s-org/sutra-vehicle</code></div>
-        <div><span>Edge Functions</span><code>directions · geocode · corridor · nearby</code></div>
+        <div><span>Edge Functions</span><code>directions · geocode · corridor · nearby · notify</code></div>
       </div>
     </section>
 
@@ -354,6 +354,7 @@ flowchart LR
         <li><time>15 Oct</time><div><b>Live surroundings view</b><p>A driver-centred radar: the driver at the centre, the SUTRA vehicles around them placed by distance and by how many degrees off the nose, carried forward between position updates so they move smoothly. A Radar / Map toggle swaps it for the same vehicles drawn on the map. Realtime could not do this - a driver may read only their own position row - so the database answers through a checked function that returns kinematics with an opaque reference and no plate, driver name or vehicle id.</p></div></li>
         <li><time>15 Oct</time><div><b>A simulated fleet</b><p>Vehicles that behave like phones, so the system can be demonstrated without one device per vehicle. Each registers a real vehicle and reports through the same client the app uses, so triggers, violations, corridor warnings and the radar all treat them as ordinary traffic, and row-level security applies as it would to any driver. One can be made to speed, which is the quickest way to show an automatic alert arriving.</p></div></li>
         <li><time>15 Oct</time><div><b>The console now recovers by itself</b><p>Reported from real use: the console had to be reloaded again and again. Nothing rejoined a dropped Realtime channel, the hourly token refresh was never passed to Realtime (so it kept authorizing against an expired one while the socket stayed open), and violations had never been published at all. It now rejoins with backoff, keeps Realtime's token current, and re-reads the live positions every 15 seconds regardless - Realtime is the fast path, not the only one.</p></div></li>
+        <li><time>15 Oct</time><div><b>Push to a closed app</b><p>An alert insert now also calls a <code>notify</code> function, which pushes it through Expo to the phone in the addressed vehicle, so the give-way warning reaches a phone whose app has been swiped away. Pushes are sent at most once, never after the alert has expired, and collapse with the alert the open app raises itself. Verified live up to the push service; a notification on a real phone waits on a Firebase project.</p></div></li>
         <li><time>22 Sep</time><div><b>Alerts, green corridor, layout</b><p>Beeping alerts and automatic overspeed warnings. The green corridor end to end. Internal database functions locked down. Keyboard and screen-edge alignment fixed across the app. This record added to the repository as <code>docs/project-record.html</code>, kept up to date with every change.</p></div></li>
       </ol>
     </section>
@@ -367,7 +368,7 @@ flowchart LR
         <li>Map follows the driver. Search places, or long-press the map to set a destination; fastest route drawn.</li>
         <li>One tap routes to the nearest hospital, fire station or police station, found around the driver in OpenStreetMap. Without a location fix the app refuses rather than guessing an origin.</li>
         <li><b>Around me:</b> a radar of nearby SUTRA vehicles, emergency ones in green and vehicles being told to give way ringed. Positions are interpolated between updates so the view moves rather than jumps. It states on screen that it sees only SUTRA vehicles, never other traffic or pedestrians.</li>
-        <li>Alerts beep, vibrate and show a notification with no tap needed.</li>
+        <li>Alerts beep, vibrate and show a notification with no tap needed - and, once Firebase is configured, arrive as a push even when the app is closed. A phone that is open and also gets the push shows one notification, not two.</li>
         <li>Crashes are captured and shown on the next launch.</li>
       </ul>
       <h3>Operator console</h3>
@@ -419,6 +420,7 @@ flowchart LR
         <li>Internal database functions are closed to the public API (migration 10). Before that, anyone could trigger data pruning or the operator-invite sync.</li>
         <li>No map or routing API keys anywhere. The Supabase anon key in the app is public by design; RLS is the protection.</li>
         <li>Operators are granted through <code>operator_invites</code>; nobody can promote themselves.</li>
+        <li>Push cannot be abused through its public endpoint: <code>notify</code> accepts only an alert id, takes everything else from the database, and a replay sends nothing. Only the server can claim an alert or unregister a device; a phone can register itself only to a vehicle its driver owns.</li>
         <li>Drivers never see each other's identities. The surroundings view goes through a function that checks the caller owns the vehicle, clamps the radius to 1 km, drops positions older than 15 seconds and returns an opaque reference that differs for every caller, so two drivers cannot compare notes to re-identify a vehicle.</li>
       </ul>
     </section>
@@ -437,6 +439,7 @@ flowchart LR
             <tr><td><code>corridors</code> and 3 child tables</td><td>Route points, simulated junction states, drivers warned</td></tr>
             <tr><td><code>operators</code>, <code>operator_invites</code></td><td>Who may watch the whole fleet</td></tr>
             <tr><td><code>emergency_grants</code></td><td>Who granted emergency authorization, to which vehicle, when</td></tr>
+            <tr><td><code>device_tokens</code></td><td>Which phone is in which vehicle, so a push reaches the right driver</td></tr>
             <tr><td><i>no table</i> — <code>nearby_vehicles()</code></td><td>What a driver may learn about vehicles around them: position, speed, heading and type, under an opaque per-caller reference</td></tr>
             <tr><td><code>settings</code>, <code>retention_policy</code></td><td>Speed limit (80 km/h); prune windows</td></tr>
           </tbody>
@@ -450,8 +453,8 @@ flowchart LR
         <table>
           <thead><tr><th>Suite</th><th>Count</th><th>Runs on</th></tr></thead>
           <tbody>
-            <tr><td>App: screens, alerts, corridor, telemetry</td><td class="num">157 passing</td><td>Jest</td></tr>
-            <tr><td>Database rules and triggers, Edge Function handlers</td><td class="num">204 passing</td><td>PGlite (Postgres in WASM), no Docker</td></tr>
+            <tr><td>App: screens, alerts, corridor, telemetry</td><td class="num">172 passing</td><td>Jest</td></tr>
+            <tr><td>Database rules and triggers, Edge Function handlers</td><td class="num">242 passing</td><td>PGlite (Postgres in WASM), no Docker</td></tr>
           </tbody>
         </table>
       </div>
@@ -475,7 +478,7 @@ flowchart LR
     <section id="limits">
       <h2>Known limits</h2>
       <ul>
-        <li>Alerts reach a running app, including in the background. A fully closed app gets nothing; that needs FCM push.</li>
+        <li>Push to a closed app is built and verified up to the push service, but needs a Firebase project before a phone can receive one. Expo's delivery receipts are not yet checked.</li>
         <li>“Fastest” route uses speed limits, not live traffic; live traffic needs the authority’s feed or a paid provider.</li>
         <li>Only drivers running SUTRA get corridor warnings.</li>
         <li>The public OSRM, Nominatim and Overpass servers have no uptime guarantee. The junction lookup is often refused or rate-limited, so it retries from the phone; a corridor still starts without junctions if both fail.</li>
@@ -490,6 +493,7 @@ flowchart LR
         <li>Install <code>sutra-vehicle-keyboard-fix.apk</code> and check: the beep on a new alert, text boxes above the keyboard, the layout clear of the status and navigation bars.</li>
         <li>Add <code>https://sutra-control.expo.app</code> to Supabase → Authentication → URL Configuration → Redirect URLs, so password-reset emails return to the console.</li>
         <li>To try a corridor, open <b>Vehicles</b> in the console, set the type to AMBULANCE and press <b>Authorize</b>, then start a shift in that vehicle. Seeing a driver get warned needs a second phone on the route.</li>
+        <li><b>Turn on push:</b> create a Firebase project with an Android app for <code>com.sutra.vehicle</code>; put <code>google-services.json</code> in <code>mobile/</code>; upload the service-account key to EAS (expo.dev → Credentials → FCM V1). Never commit that key. Then rebuild the APK.</li>
         <li>Optional: enable leaked-password protection in Supabase Auth (flagged by the security advisor).</li>
       </ul>
     </section>

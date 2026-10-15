@@ -1,4 +1,17 @@
+import { existsSync } from 'node:fs';
 import type { ExpoConfig } from 'expo/config';
+
+/**
+ * Firebase's client config, which Android needs before it will issue a push
+ * token. Optional on purpose: without it the app builds and runs exactly as
+ * before, alerts arrive over Realtime while it is open, and only push to a
+ * closed app is missing. Download it from the Firebase console and drop it
+ * here; it holds public identifiers only and is safe to commit. The private
+ * service-account key is a different file and must never be put here - it
+ * goes to EAS (expo.dev > Credentials > FCM V1 service account key).
+ */
+const GOOGLE_SERVICES = './google-services.json';
+const hasFirebase = existsSync(GOOGLE_SERVICES);
 
 /**
  * Replaces app.json so the Maps key can come from the environment rather than
@@ -36,6 +49,7 @@ const config: ExpoConfig = {
       monochromeImage: './assets/android-icon-monochrome.png',
     },
     predictiveBackGestureEnabled: false,
+    ...(hasFirebase ? { googleServicesFile: GOOGLE_SERVICES } : {}),
     permissions: [
       'ACCESS_COARSE_LOCATION',
       'ACCESS_FINE_LOCATION',

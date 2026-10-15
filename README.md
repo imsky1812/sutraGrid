@@ -119,9 +119,40 @@ Alerts come from three places:
 | The database, on a speeding episode | RULE, "Overspeeding: 95 km/h in a 80 km/h zone" | once per episode |
 | A green corridor | EMERGENCY, "Emergency vehicle ... give way" | once per vehicle per corridor |
 
-Alerts ride Supabase Realtime, so they arrive while the app is running
-(including in the background while location sharing keeps it alive). A phone
-with the app fully closed hears nothing; that would need FCM push.
+Alerts ride Supabase Realtime while the app is running, and are **also pushed**,
+so they reach a phone whose app has been closed:
+
+```
+alert inserted → trigger → pg_net → notify Edge Function → Expo → FCM → phone
+```
+
+`notify` takes only an alert id and trusts nothing else in the request. It
+calls `claim_alert_push`, which stamps `alerts.pushed_at` and returns the
+recipients, so a replayed or duplicated call sends nothing. An addressed alert
+goes to the phone currently driving that vehicle (`device_tokens.vehicle_id`),
+a broadcast to every registered phone, and an expired one to nobody: a give-way
+warning that arrives after the ambulance has passed is wrong, not just late.
+Each push's time-to-live is the alert's remaining life for the same reason.
+
+Push is sent even to phones that are open, because Realtime has been seen to
+die silently. The phone collapses the two into one: both carry the identifier
+`sutra-alert-<id>`, which on Android is the notification's tag, so the second
+replaces the first in the tray; and the app silences a push for an alert it has
+already sounded.
+
+**Push needs Firebase, which is set up outside the code.** Until it is, the app
+builds and behaves exactly as before - alerts over Realtime while it runs - and
+registration logs why it could not get a token:
+
+1. Create a Firebase project and add an Android app with package
+   `com.sutra.vehicle`. Download `google-services.json` into `mobile/`. It holds
+   public identifiers and may be committed; `app.config.ts` picks it up
+   automatically when present.
+2. In Firebase, *Project settings → Service accounts → Generate new private
+   key*. Upload that JSON to EAS (*expo.dev → Credentials → Android → FCM V1
+   service account key*). **It is a private credential: never commit it.**
+   `.gitignore` blocks the usual file names.
+3. Rebuild the APK.
 
 ---
 
@@ -168,6 +199,7 @@ the phone and a corridor starts without junctions if both fail.
 | `alerts`, `alert_receipts` | Operator and system alerts, and acknowledgements |
 | `corridors`, `corridor_route_points`, `corridor_signals`, `corridor_warnings` | Green corridors: route, simulated junction states, drivers warned |
 | `operators`, `operator_invites` | Who may watch the whole fleet |
+| `device_tokens` | Which phone is in which vehicle, for push |
 | *(function)* `nearby_vehicles()` | What a driver may see around them, with identities stripped |
 | `settings` | Speed limit, shared by trigger and clients |
 | `retention_policy` | Prune windows, as data rather than code |
@@ -224,6 +256,15 @@ npx supabase functions deploy directions
 npx supabase functions deploy geocode
 npx supabase functions deploy corridor
 npx supabase functions deploy nearby
+npx supabase functions deploy notify
+```
+
+Push also needs two Vault secrets the alerts trigger reads, so migrations stay
+free of project-specific values:
+
+```sql
+select vault.create_secret('https://<ref>.supabase.co', 'sutra_project_url');
+select vault.create_secret('<anon key>', 'sutra_push_key');
 ```
 
 ### 3. Dashboard
@@ -266,8 +307,8 @@ npm run apk              # gradlew assembleDebug with ninja parallelism capped
 ## Testing
 
 ```bash
-cd mobile         && npm test && npm run typecheck   # 157 tests
-cd supabase/tests && npm install && npm test         # 204 tests
+cd mobile         && npm test && npm run typecheck   # 172 tests
+cd supabase/tests && npm install && npm test         # 242 tests
 ```
 
 Schema and RLS tests run against **PGlite** — Postgres compiled to WASM, in
@@ -420,5 +461,7 @@ Things that cost real time here and are worth knowing:
   prune keeps 30 days.
 - Public OSRM, Nominatim and Overpass endpoints carry no availability
   guarantee.
-- Alerts reach only a running app; there is no push for a closed one.
+- Push to a closed app needs Firebase configured (see *Alerts that make a
+  sound*). Push receipts are not yet checked, so a delivery Expo accepted but
+  FCM later dropped is not visible.
 - Green-corridor signal states are simulated (see above).
