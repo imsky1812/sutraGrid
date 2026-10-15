@@ -505,7 +505,8 @@ flowchart LR
         <li>Only drivers running SUTRA get corridor warnings.</li>
         <li>The public OSRM, Nominatim and Overpass servers have no uptime guarantee. The junction lookup is often refused or rate-limited, so it retries from the phone; a corridor still starts without junctions if both fail.</li>
         <li>EAS build artifacts expire after 14 days, so a download link older than that returns 404 and the app has to be rebuilt.</li>
-        <li>No CI: the 258 tests run only when someone runs them. The app suite can also time out when the machine is busy running the database suite at the same time.</li>
+        <li>Spatial lookups use plain indexes, which is fine at today's scale (about 6 ms per position update with every check running) but will need PostGIS once roads for a whole city are imported or a few hundred vehicles are active. Deferred deliberately; the trigger is written down in the roadmap.</li>
+        <li>No CI: the tests run only when someone runs them. The app suite can also time out when the machine is busy running the database suite at the same time.</li>
       </ul>
     </section>
 

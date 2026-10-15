@@ -270,7 +270,7 @@
   <tr><td>7</td><td>Collision / near-miss warning</td><td><span class="tag done">Done · 16 Oct</span></td></tr>
   <tr><td>8</td><td>Richer violation types</td><td><span class="tag done">Done · 16 Oct</span></td></tr>
   <tr><td>9</td><td>Geofencing + event engine</td><td><span class="tag done">Done · 16 Oct</span></td></tr>
-  <tr><td>10</td><td>PostGIS spatial queries</td><td><span class="tag med">Medium</span></td></tr>
+  <tr><td>10</td><td>PostGIS spatial queries</td><td><span class="tag low">Deferred — see trigger</span></td></tr>
   <tr><td>11</td><td>Per-road speed limits</td><td><span class="tag done">Done · 16 Oct</span></td></tr>
   <tr><td>12</td><td>Signal-adapter interface</td><td><span class="tag done">Done · 16 Oct</span></td></tr>
   <tr><td>13</td><td>Offline buffering</td><td><span class="tag done">Done · 16 Oct</span></td></tr>
@@ -657,8 +657,40 @@
   <div class="phase-head">
     <span class="phase-no">PHASE 10</span>
     <h3>PostGIS spatial queries</h3>
-    <span class="tag med">Medium — and the one with a trap</span>
+    <span class="tag low">Deferred · 16 Oct</span>
   </div>
+  <div class="callout">
+    <p>
+      <strong>Decision: not now, and here is when.</strong> Measured on the
+      live project with every check running against the imported roads, one
+      position update takes about <strong>6&nbsp;ms</strong> in the database,
+      against one update every 1&ndash;3&nbsp;seconds per vehicle. At today's
+      scale (a handful of vehicles, about 13,000 road segments) PostGIS would
+      make nothing faster that anyone could notice, and it carries a real cost:
+      the test harness cannot load it, so every spatial query would need two
+      versions and the PostGIS one could only be tested on a separate branch
+      database.
+    </p>
+    <p>
+      <strong>Why it will be needed later.</strong> Two lookups grow with
+      scale. The wrong-way and speed-limit checks search
+      <code>road_segments</code> on every position, and its index narrows only
+      by latitude, so the cost grows with the area imported: fine for one
+      district, tens of milliseconds per check for a whole city's few hundred
+      thousand segments. And the radar and collision checks scan every live
+      position with no location index at all: fine at a few vehicles,
+      noticeable in the hundreds. A GiST spatial index fixes both.
+    </p>
+    <p>
+      <strong>Trigger to do it:</strong> roads imported for a whole city, or a
+      few hundred vehicles active at once &mdash; whichever comes first. Before
+      either, it can be proven with a measurement: load a city's worth of
+      synthetic roads and vehicles in a rolled-back transaction and time the
+      per-position cost. That number, not the choice of database, is the
+      answer to "does it scale?".
+    </p>
+  </div>
+  <p class="muted">The original plan, kept for when the trigger is reached:</p>
   <div class="callout warn">
     <p>
       <strong>The trap:</strong> PostGIS is available on the project but not
