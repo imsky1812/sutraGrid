@@ -33,6 +33,39 @@ export function cadenceFor(isEmergencyAuthorized: boolean): number {
   return isEmergencyAuthorized ? 1000 : 3000;
 }
 
+/**
+ * How often a position is SENT, by how fast the vehicle is going.
+ *
+ * A phone's GPS produces about one fix a second, so 1 s is the floor: sending
+ * more often would only repeat the same position. Above walking pace in
+ * traffic, collision, zone and wrong-way checks are only as precise as the
+ * gap between fixes - 50 m at 60 km/h when it was 3 s - so a moving vehicle
+ * sends every fix. A parked one has nothing new to say.
+ */
+export const PARKED_KMH = 2;
+export const SLOW_KMH = 20;
+
+export function sendIntervalFor(isEmergencyAuthorized: boolean, speedKmh: number): number {
+  if (isEmergencyAuthorized) return 1000;
+  if (speedKmh < PARKED_KMH) return 10_000;
+  if (speedKmh < SLOW_KMH) return 3000;
+  return 1000;
+}
+
+/**
+ * How often the GPS itself is asked for a fix. This is where the battery goes,
+ * so a parked phone asks rarely. It changes only between parked and driving -
+ * a few times a trip - because restarting location updates, the background
+ * service especially, is the fragile part of this app; slow traffic is
+ * handled by sending fewer of the 1 s fixes instead.
+ */
+export const GPS_MOVING_MS = 1000;
+export const GPS_PARKED_MS = 10_000;
+/** Stationary this long before the GPS slows down; a red light is not parking. */
+export const PARKED_AFTER_MS = 30_000;
+/** Moving again is noticed at the first fix above this. */
+export const MOVING_KMH = 5;
+
 type Coords = {
   coords: {
     latitude: number;
@@ -73,6 +106,15 @@ let foregroundWatch: Location.LocationSubscription | null = null;
 let activeDestination: Destination | null = null;
 let activeAlert: string | null = null;
 
+// Adaptive cadence.
+let activeEmergency = false;
+let activeAccuracy: Location.Accuracy = Location.Accuracy.Balanced;
+let backgroundOn = false;
+let lastSentAt = 0;
+let parkedSince: number | null = null;
+let gpsMode: 'moving' | 'parked' = 'moving';
+let switchingGps = false;
+
 export function setDestination(destination: Destination | null): void {
   activeDestination = destination;
 }
@@ -85,8 +127,17 @@ export function setAlertMessage(message: string | null): void {
  * Send one position. Shared by the foreground watch and the background task so
  * both produce identical rows.
  */
-async function pushPosition(loc: Coords): Promise<void> {
+async function pushPosition(loc: Coords, now = Date.now()): Promise<void> {
   if (!activeVehicleId) return;
+
+  const speedKmh = Math.max(0, (loc.coords.speed ?? 0) * 3.6);
+  void adaptGps(speedKmh, now);
+
+  // Not every fix needs sending. This also stops the double send when the
+  // foreground watch and the background task both deliver the same fix.
+  // A little slack, because location callbacks do not arrive on the dot.
+  if (lastSentAt && now - lastSentAt < sendIntervalFor(activeEmergency, speedKmh) - 250) return;
+  lastSentAt = now;
 
   const row = buildPositionRow(activeVehicleId, loc, activeDestination, activeAlert);
   const { error } = await supabase
@@ -105,6 +156,77 @@ async function pushPosition(loc: Coords): Promise<void> {
 
   // Back online: send anything kept while there was no signal.
   void flushIfDue(row.vehicle_id);
+}
+
+function watchForeground(intervalMs: number): Promise<Location.LocationSubscription> {
+  return Location.watchPositionAsync(
+    { accuracy: activeAccuracy, timeInterval: intervalMs, distanceInterval: 0 },
+    (loc) => {
+      void pushPosition(loc).catch(() => {});
+    },
+  );
+}
+
+function startBackground(intervalMs: number): Promise<void> {
+  return Location.startLocationUpdatesAsync(TELEMETRY_TASK, {
+    accuracy: activeAccuracy,
+    timeInterval: intervalMs,
+    distanceInterval: 0,
+    showsBackgroundLocationIndicator: true,
+    foregroundService: {
+      notificationTitle: 'SUTRA Vehicle Client',
+      notificationBody: 'Sharing your location with SUTRA traffic control.',
+      notificationColor: '#D7F94A',
+    },
+  });
+}
+
+/**
+ * Ask the GPS less often once parked, and normally again once moving.
+ * Emergency vehicles always run at the full rate.
+ */
+async function adaptGps(speedKmh: number, now: number): Promise<void> {
+  if (activeEmergency || switchingGps || !activeVehicleId) return;
+
+  if (speedKmh < PARKED_KMH) parkedSince ??= now;
+  else parkedSince = null;
+
+  const want =
+    parkedSince !== null && now - parkedSince >= PARKED_AFTER_MS
+      ? 'parked'
+      : speedKmh >= MOVING_KMH
+        ? 'moving'
+        : gpsMode;
+  if (want === gpsMode) return;
+
+  switchingGps = true;
+  const interval = want === 'parked' ? GPS_PARKED_MS : GPS_MOVING_MS;
+  const previous = want === 'parked' ? GPS_MOVING_MS : GPS_PARKED_MS;
+  try {
+    foregroundWatch?.remove();
+    foregroundWatch = await watchForeground(interval);
+
+    if (backgroundOn) {
+      try {
+        try {
+          await Location.stopLocationUpdatesAsync(TELEMETRY_TASK);
+        } catch {
+          // Already stopped is fine; starting again is what matters.
+        }
+        await startBackground(interval);
+      } catch (e) {
+        // Never leave the vehicle without background updates over a change of
+        // rate: put the old one back.
+        console.warn('[telemetry] could not change background rate:', (e as Error)?.message ?? e);
+        await startBackground(previous).catch(() => {});
+      }
+    }
+    gpsMode = want;
+  } catch (e) {
+    console.warn('[telemetry] could not change GPS rate:', (e as Error)?.message ?? e);
+  } finally {
+    switchingGps = false;
+  }
 }
 
 // Defined at module scope so the background runtime can find it. Registering it
@@ -175,10 +297,17 @@ export async function startTelemetry(vehicle: Vehicle): Promise<void> {
   }
 
   activeVehicleId = vehicle.id;
-  const interval = cadenceFor(vehicle.is_emergency_authorized);
-  const accuracy = vehicle.is_emergency_authorized
+  activeEmergency = vehicle.is_emergency_authorized;
+  activeAccuracy = vehicle.is_emergency_authorized
     ? Location.Accuracy.High
     : Location.Accuracy.Balanced;
+  const accuracy = activeAccuracy;
+  // Start at the full rate; a vehicle that turns out to be parked slows down
+  // after half a minute.
+  gpsMode = 'moving';
+  parkedSince = null;
+  lastSentAt = 0;
+  backgroundOn = false;
 
   // Send one position immediately so the vehicle appears on the dashboard the
   // moment a shift starts, rather than after the first movement.
@@ -189,12 +318,7 @@ export async function startTelemetry(vehicle: Vehicle): Promise<void> {
   }
 
   foregroundWatch?.remove();
-  foregroundWatch = await Location.watchPositionAsync(
-    { accuracy, timeInterval: interval, distanceInterval: 0 },
-    (loc) => {
-      void pushPosition(loc).catch(() => {});
-    },
-  );
+  foregroundWatch = await watchForeground(GPS_MOVING_MS);
 
   // Everything past here is the background upgrade, and none of it is allowed
   // to stop foreground streaming that is already working.
@@ -219,17 +343,8 @@ export async function startTelemetry(vehicle: Vehicle): Promise<void> {
       await Location.stopLocationUpdatesAsync(TELEMETRY_TASK).catch(() => {});
     }
 
-    await Location.startLocationUpdatesAsync(TELEMETRY_TASK, {
-      accuracy,
-      timeInterval: interval,
-      distanceInterval: 0,
-      showsBackgroundLocationIndicator: true,
-      foregroundService: {
-        notificationTitle: 'SUTRA Vehicle Client',
-        notificationBody: 'Sharing your location with SUTRA traffic control.',
-        notificationColor: '#D7F94A',
-      },
-    });
+    await startBackground(GPS_MOVING_MS);
+    backgroundOn = true;
   } catch (e) {
     console.warn('[telemetry] background streaming unavailable:', (e as Error)?.message ?? e);
   }
@@ -250,4 +365,11 @@ export async function stopTelemetry(): Promise<void> {
   activeVehicleId = null;
   activeDestination = null;
   activeAlert = null;
+  backgroundOn = false;
+  lastSentAt = 0;
+  parkedSince = null;
+  gpsMode = 'moving';
 }
+
+/** For tests: send one fix as if it had come from the GPS at time `now`. */
+export const __pushForTest = pushPosition;

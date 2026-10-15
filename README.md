@@ -32,7 +32,7 @@ sequenceDiagram
     App->>SB: sign in (email + password)
     App->>SB: select vehicles (RLS: own only)
     Note over App: expo-location background task starts
-    loop every 1s emergency / 3s normal
+    loop every 1s moving or emergency, 3s slow, 10s parked
         App->>SB: upsert vehicle_positions
         Note over SB: constraints validate,<br/>triggers append history + violations
         SB-->>Dash: Realtime postgres_changes
@@ -462,6 +462,26 @@ in the default `simulation` mode nothing is sent. `tools/mock-signal-adapter.mjs
 is a reference implementation of the city's side. Corridors whose vehicle has
 been silent for two minutes, or that are past their hour, are ended every
 minute by `end_stale_corridors()`, which releases any junction still held.
+
+## How often a vehicle reports
+
+A phone's GPS gives about one fix a second, so 1 s is the floor - sending more
+often would repeat the same position. The database takes about 6 ms to process
+one; the limits are the GPS and the mobile network, not the server.
+
+| Vehicle | Sends |
+| --- | --- |
+| Emergency (authorized) | every 1 s, always |
+| Moving, 20 km/h and up | every 1 s |
+| Slow traffic, under 20 km/h | every 3 s |
+| Parked, under 2 km/h | every 10 s |
+
+The GPS itself is asked for a fix every second while driving and every 10 s
+once a vehicle has been still for 30 s (a red light is not parking); it is the
+GPS, not the upload, that costs battery. That rate changes only between parked
+and driving, a few times a trip, because restarting location updates - the
+background service especially - is the fragile part of the app; if a restart
+fails, the previous rate is put back.
 
 ## Without signal
 

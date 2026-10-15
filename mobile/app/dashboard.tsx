@@ -666,7 +666,9 @@ export default function Dashboard() {
               {vehicle.vehicle_number}
             </Text>
             <Text style={styles.statusMeta} numberOfLines={1}>
-              Streaming every {vehicle.is_emergency_authorized ? '1s' : '3s'}
+              {vehicle.is_emergency_authorized
+                ? 'Streaming every 1s'
+                : 'Streaming every 1–10s, by speed'}
             </Text>
           </View>
         </View>

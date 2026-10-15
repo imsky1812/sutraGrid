@@ -858,6 +858,26 @@
   </p>
 </div>
 
+<div class="phase">
+  <div class="phase-head">
+    <span class="phase-no">16 OCT</span>
+    <h3>Reporting rate follows speed</h3>
+    <span class="tag done">Changed</span>
+  </div>
+  <p>
+    Normal vehicles reported every 3 s regardless of speed — at 60 km/h, 50 m
+    between fixes, which blunted collision, zone and wrong-way checks. The
+    database's ~6 ms per update is not the limit; a phone's GPS, at about one
+    fix a second, is. So vehicles now send every 1 s while moving, every 3 s in
+    slow traffic and every 10 s when parked (emergency vehicles always every
+    second), and the GPS itself drops to one fix every 10 s after half a minute
+    parked, which is where the battery saving comes from. The GPS rate changes
+    only between parked and driving, because restarting the background service
+    is the app's most fragile path; a failed restart puts the old rate back.
+    13 tests.
+  </p>
+</div>
+
 <h2>What is deliberately not here</h2>
 <p>
   The source document is clear about the limits of the approach, and they belong
