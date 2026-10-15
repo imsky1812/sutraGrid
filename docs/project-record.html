@@ -306,7 +306,7 @@
       <div class="links">
         <div><span>Operator console</span><a href="https://sutra-control.expo.app">sutra-control.expo.app</a></div>
         <div><span>Source</span><a href="https://github.com/imsky1812/sutraGrid">github.com/imsky1812/sutraGrid</a></div>
-        <div><span>Latest APK</span><code>sutra-vehicle-oct15.apk</code><br><small class="mono">EAS build ee5a8c2f · 15 Oct 2026</small></div>
+        <div><span>Latest APK</span><code>sutra-vehicle-oct16.apk</code><br><small class="mono">EAS build 03b8dfac · 16 Oct 2026</small></div>
         <div><span>Supabase project</span><code>ytqpjxpzhgintwpbujcy</code></div>
         <div><span>EAS project</span><code>@imsky1812s-org/sutra-vehicle</code></div>
         <div><span>Edge Functions</span><code>directions · geocode · corridor · nearby · notify</code></div>
@@ -359,7 +359,7 @@ flowchart LR
         <li><time>16 Oct</time><div><b>Collision warnings at junctions</b><p>When two vehicles are heading for the same point, both drivers are warned a few seconds ahead and told which side the other is coming from. Deliberately limited to paths that cross at an angle: phone GPS cannot tell lanes apart, so warning about oncoming or overtaking traffic would fire on every passing car.</p></div></li>
         <li><time>16 Oct</time><div><b>Harsh braking and wrong-way driving</b><p>Two new violation kinds. Harsh braking is recorded but never announced. Wrong-way driving uses OpenStreetMap one-way data loaded by a road importer, needs three fixes in a row, and ignores the opposite carriageway of a divided road; the driver gets an urgent alert naming the road. Two assumptions in the speeding code that only held while it was the only kind were fixed first.</p></div></li>
         <li><time>16 Oct</time><div><b>Zones and one record of events</b><p>Operators draw zones on the map; entering or leaving one is recorded, and a zone can send the driver a message on the way in, such as a school-zone warning. Every check now writes into a single events table, which the console's log reads live.</p></div></li>
-        <li><time>16 Oct</time><div><b>Email confirmation fixed</b><p>Confirmation emails linked to localhost:3000, a dead page on a phone. Both sign-up paths now land on a real confirmation page on the console.</p></div></li>
+        <li><time>16 Oct</time><div><b>Email confirmation fixed</b><p>Confirmation emails linked to localhost:3000, a dead page on a phone. Both sign-up paths now land on a real confirmation page on the console, and the project's Site URL and redirect allow-list point there; a new sign-up on 16 October confirmed through it.</p></div></li>
         <li><time>16 Oct</time><div><b>Tools run for real</b><p>The road importer loaded 2,337 roads around the test phones, surviving an outage of the main Overpass server by splitting the area into tiles, trying four servers and saving as it goes. A two-minute simulator run then exercised the live system: speeding caught and alerted, a genuine collision warning between two simulated cars crossing a junction, and the school-zone message on entry, with no false harsh-braking or wrong-way flags. Running it found two bugs, both fixed: its clean-up had silently deleted nothing, and its hold-ups braked hard enough to count as harsh braking. Step-by-step instructions and the recorded run are in <code>tools/README.md</code>.</p></div></li>
         <li><time>22 Sep</time><div><b>Alerts, green corridor, layout</b><p>Beeping alerts and automatic overspeed warnings. The green corridor end to end. Internal database functions locked down. Keyboard and screen-edge alignment fixed across the app. This record added to the repository as <code>docs/project-record.html</code>, kept up to date with every change.</p></div></li>
       </ol>
@@ -506,10 +506,8 @@ flowchart LR
     <section id="next">
       <h2>Open actions</h2>
       <ul class="todo">
-        <li>Install <code>sutra-vehicle-keyboard-fix.apk</code> and check: the beep on a new alert, text boxes above the keyboard, the layout clear of the status and navigation bars.</li>
-        <li>Add <code>https://sutra-control.expo.app</code> to Supabase → Authentication → URL Configuration → Redirect URLs, so password-reset emails return to the console.</li>
+        <li>Install <code>sutra-vehicle-oct16.apk</code> on both phones and check: the beep on a new alert, the Around me radar with the other phone nearby, and Trips and history.</li>
         <li>To try a corridor, open <b>Vehicles</b> in the console, set the type to AMBULANCE and press <b>Authorize</b>, then start a shift in that vehicle. Seeing a driver get warned needs a second phone on the route.</li>
-        <li><b>Fix email confirmation for good:</b> in Supabase → Authentication → URL Configuration, set the Site URL to <code>https://sutra-control.expo.app/confirmed.html</code> and add <code>https://sutra-control.expo.app/**</code> to the redirect URLs.</li>
         <li><b>Import roads</b> for any further area you operate in (the test phones' area is done): <code>node import-roads.mjs --near lat,lng --radius 3000</code> from <code>tools/</code>. See <code>tools/README.md</code>.</li>
         <li><b>Test push:</b> install the latest APK on both phones and start a shift on each, then swipe SUTRA away on one and send it an alert from the console. It should still beep.</li>
         <li>Optional: enable leaked-password protection in Supabase Auth (flagged by the security advisor).</li>
