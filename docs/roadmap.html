@@ -261,8 +261,8 @@
 <table>
   <tr><th>Phase</th><th>What it delivers</th><th>Priority</th></tr>
   <tr><td>0</td><td>Emergency destinations that are actually nearby</td><td><span class="tag done">Done · 15 Oct</span></td></tr>
-  <tr><td>1</td><td>Shared geometry: bearing, projection, relative position</td><td><span class="tag low">Groundwork</span></td></tr>
-  <tr><td>2</td><td>Live surroundings view — radar + map toggle</td><td><span class="tag high">Headline</span></td></tr>
+  <tr><td>1</td><td>Shared geometry: bearing, projection, relative position</td><td><span class="tag done">Done · 15 Oct</span></td></tr>
+  <tr><td>2</td><td>Live surroundings view — radar + map toggle</td><td><span class="tag done">Done · 15 Oct</span></td></tr>
   <tr><td>3</td><td>Vehicle simulator</td><td><span class="tag med">Medium</span></td></tr>
   <tr><td>4</td><td>Real-device demo run</td><td><span class="tag high">High</span></td></tr>
   <tr><td>5</td><td>Push to a closed app (FCM)</td><td><span class="tag high">High</span></td></tr>
@@ -327,7 +327,7 @@
   <div class="phase-head">
     <span class="phase-no">PHASE 1</span>
     <h3>Shared geometry</h3>
-    <span class="tag low">Groundwork</span>
+    <span class="tag done">Done · 15 Oct</span>
   </div>
   <p>
     Small and boring, and it unblocks Phases 2, 7 and 8. <code>heading</code> is
@@ -342,8 +342,15 @@
       exists as of Phase&nbsp;0 and already holds <code>distanceM</code>.</li>
     <li>GPS heading is <code>0</code> whenever the phone is stationary, so a
       derived bearing from the previous fix is needed above walking pace.</li>
-    <li>Matching SQL <code>public.bearing_deg(...)</code> for the trigger work
-      in later phases.</li>
+    <li>Shipped as <code>mobile/src/geo.ts</code>: <code>distanceM</code>,
+      <code>bearing</code>, <code>project</code>, <code>normalizeDeg</code>,
+      <code>toRelative</code> and <code>headingFrom</code>, with 16 tests
+      pinning the compass convention and the inverse relationship between
+      bearing and projection.</li>
+    <li>The matching SQL <code>bearing_deg</code> was <em>not</em> added. Every
+      function in the public schema is a REST endpoint, and nothing server-side
+      needs a bearing until Phase&nbsp;7 — so it is written there instead of
+      shipping an unused one now.</li>
   </ul>
 </div>
 
@@ -351,7 +358,7 @@
   <div class="phase-head">
     <span class="phase-no">PHASE 2</span>
     <h3>Live surroundings view</h3>
-    <span class="tag high">Headline</span>
+    <span class="tag done">Done · 15 Oct</span>
   </div>
   <p>
     The driver at the centre, other SUTRA vehicles around them, moving smoothly.
@@ -391,8 +398,17 @@
       badge is: only SUTRA vehicles appear. No pedestrians, no unconnected
       traffic, no lane detail — that needs sensors on the vehicle. An empty
       radar means nobody nearby is running SUTRA, not that the road is clear.
+      This paragraph is on the screen, not only in this document.
     </p>
   </div>
+  <p><strong>Shipped:</strong> migration
+    <code>20261015000012_nearby_vehicles.sql</code> (applied live and rehearsed
+    in a rolled-back transaction against the real project),
+    <code>surroundings.ts</code>, <code>Radar.tsx</code> and an
+    <em>Around me</em> pane with the Radar / Map toggle. Polling follows the
+    telemetry cadence — every second for an authorized emergency vehicle, every
+    three otherwise — and only while the pane is open. 14 database tests, 23
+    app tests for the module and the component, 5 more for the pane.</p>
 </div>
 
 <div class="phase">

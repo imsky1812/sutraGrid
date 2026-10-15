@@ -168,6 +168,7 @@ the phone and a corridor starts without junctions if both fail.
 | `alerts`, `alert_receipts` | Operator and system alerts, and acknowledgements |
 | `corridors`, `corridor_route_points`, `corridor_signals`, `corridor_warnings` | Green corridors: route, simulated junction states, drivers warned |
 | `operators`, `operator_invites` | Who may watch the whole fleet |
+| *(function)* `nearby_vehicles()` | What a driver may see around them, with identities stripped |
 | `settings` | Speed limit, shared by trigger and clients |
 | `retention_policy` | Prune windows, as data rather than code |
 
@@ -265,8 +266,8 @@ npm run apk              # gradlew assembleDebug with ninja parallelism capped
 ## Testing
 
 ```bash
-cd mobile         && npm test && npm run typecheck   # 113 tests
-cd supabase/tests && npm install && npm test         # 174 tests
+cd mobile         && npm test && npm run typecheck   # 157 tests
+cd supabase/tests && npm install && npm test         # 188 tests
 ```
 
 Schema and RLS tests run against **PGlite** — Postgres compiled to WASM, in
@@ -290,6 +291,30 @@ The search widens through 5, 15 and 40 km until something is found, so a rural
 road still gets an answer. If no location fix has arrived yet the chips are
 disabled and routing refuses - a guessed origin is what made the wrong route
 look like a working one.
+
+## Around me
+
+A driver-centred view of the SUTRA vehicles nearby: the driver fixed at the
+centre pointing up, others placed by distance and by how many degrees off the
+nose. A toggle swaps the radar for the same vehicles on the map.
+
+Tesla does this with cameras on the car, which see all traffic. A phone cannot,
+so this is the connected-vehicle version - and the screen says so, the same way
+the corridor labels its signals simulated.
+
+Realtime cannot serve it: a driver may select only their own `vehicle_positions`
+row, and Realtime delivers only rows the subscriber may select, so a
+subscription returns their own vehicle and nothing else. Widening that policy
+would hand every signed-in account the live position of the whole fleet.
+Instead `nearby_vehicles()` runs as the owner and returns position, speed,
+heading, type and a `warned` flag under an **opaque per-caller reference** -
+never a plate, a driver name or a vehicle id. Two drivers cannot compare
+references to re-identify anyone.
+
+Positions arrive every one to three seconds. Each vehicle is carried forward
+along its own heading and speed in between, and stops being guessed after six
+seconds, because a car that braked or turned would otherwise sail on through a
+wall.
 
 ## Roadmap
 
