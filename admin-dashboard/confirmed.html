@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SUTRA · Email confirmed</title>
+<style>
+  :root {
+    --canvas: #0D0F0B;
+    --surface: #161814;
+    --line: #2A2F24;
+    --accent: #D7F94A;
+    --ink: #FFFFFF;
+    --muted: #9CA096;
+    --danger: #FF6B5A;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 24px 16px;
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+  .card {
+    width: min(420px, 100%);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    padding: 28px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .brand { color: var(--accent); font-weight: 800; letter-spacing: 0.18em; font-size: 12px; text-transform: uppercase; }
+  .mark { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; font-size: 26px; }
+  .ok .mark { background: var(--accent); color: var(--canvas); }
+  .bad .mark { background: var(--danger); color: var(--canvas); }
+  h1 { margin: 0; font-size: 24px; letter-spacing: -0.02em; }
+  p { margin: 0; color: var(--muted); line-height: 1.55; }
+  ol { margin: 0; padding-left: 20px; color: var(--muted); line-height: 1.7; }
+  ol b { color: var(--ink); }
+  a { color: var(--accent); }
+  .small { font-size: 13px; }
+</style>
+</head>
+<body>
+<main class="card" id="card">
+  <span class="brand">SUTRA</span>
+  <noscript><p>Your email has been confirmed. Go back to the SUTRA app and sign in.</p></noscript>
+</main>
+<script>
+  // Supabase confirms the address on its own server before redirecting here,
+  // so arriving at all usually means it worked. It adds either an error or a
+  // fresh sign-in token to the address; the token is not needed here and is
+  // removed so it does not sit in the browser's history.
+  (function () {
+    var params = new URLSearchParams(window.location.hash.replace(/^#/, '') || window.location.search);
+    var error = params.get('error_code') || params.get('error');
+    var description = params.get('error_description');
+    if (window.location.hash || window.location.search) {
+      history.replaceState(null, '', window.location.pathname);
+    }
+
+    var card = document.getElementById('card');
+    function add(tag, text, className) {
+      var node = document.createElement(tag);
+      if (text) node.textContent = text;
+      if (className) node.className = className;
+      card.appendChild(node);
+      return node;
+    }
+
+    if (error) {
+      card.classList.add('bad');
+      add('div', '!', 'mark');
+      add('h1', 'This link did not work');
+      add('p',
+        /expired|otp/i.test(error + ' ' + (description || ''))
+          ? 'It has expired, or it was already used. If you already confirmed, you can simply sign in.'
+          : (description || 'Something went wrong confirming your email.'));
+      var steps = add('ol');
+      var a = document.createElement('li');
+      a.innerHTML = 'Open the <b>SUTRA</b> app and try to <b>sign in</b>.';
+      steps.appendChild(a);
+      var b = document.createElement('li');
+      b.innerHTML = 'If it says the email is not confirmed, tap <b>Create an account</b> again with the same email to get a new link.';
+      steps.appendChild(b);
+      return;
+    }
+
+    card.classList.add('ok');
+    add('div', '✓', 'mark');
+    add('h1', 'Your email is confirmed');
+    add('p', 'Your SUTRA account is ready.');
+    var list = add('ol');
+    var one = document.createElement('li');
+    one.innerHTML = 'Go back to the <b>SUTRA</b> app on your phone.';
+    list.appendChild(one);
+    var two = document.createElement('li');
+    two.innerHTML = 'Sign in with the same email and password.';
+    list.appendChild(two);
+    var three = document.createElement('li');
+    three.innerHTML = 'Register your vehicle and start a shift.';
+    list.appendChild(three);
+    var foot = add('p', '', 'small');
+    foot.appendChild(document.createTextNode('Fleet operators can use the '));
+    var link = document.createElement('a');
+    link.href = '/';
+    link.textContent = 'control console';
+    foot.appendChild(link);
+    foot.appendChild(document.createTextNode(' instead.'));
+  })();
+</script>
+</body>
+</html>

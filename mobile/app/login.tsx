@@ -12,6 +12,7 @@ import { router } from 'expo-router';
 import { supabase } from '../src/supabase';
 import { Badge, Field, Label, PillButton } from '../src/ui';
 import { color, space, type } from '../src/theme';
+import { EMAIL_CONFIRMED_URL } from '../src/config';
 
 export default function Login() {
   const insets = useSafeAreaInsets();
@@ -33,14 +34,21 @@ export default function Login() {
     const { data, error: authError } =
       mode === 'signIn'
         ? await supabase.auth.signInWithPassword(credentials)
-        : await supabase.auth.signUp(credentials);
+        : await supabase.auth.signUp({
+            ...credentials,
+            options: { emailRedirectTo: EMAIL_CONFIRMED_URL },
+          });
     setBusy(false);
 
     if (authError) return setError(authError.message);
 
     // With email confirmation on, signUp returns a user but no session. Routing
     // onward would land on a screen the driver is not signed in for.
-    if (!data.session) return setNotice('Confirm your email, then sign in.');
+    if (!data.session) {
+      return setNotice(
+        'Check your email and tap the link to confirm, then come back here and sign in.',
+      );
+    }
 
     router.replace('/vehicle-setup');
   }

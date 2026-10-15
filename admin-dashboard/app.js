@@ -167,7 +167,12 @@ $('gate-signup').addEventListener('click', async () => {
   button.disabled = true;
   button.textContent = 'Creating…';
 
-  const { data, error } = await supabase.auth.signUp(credentials);
+  // Without this Supabase sends the link to its default site URL,
+  // localhost:3000, which is a dead page for everyone who is not a developer.
+  const { data, error } = await supabase.auth.signUp({
+    ...credentials,
+    options: { emailRedirectTo: `${window.location.origin}/confirmed.html` },
+  });
 
   button.disabled = false;
   button.textContent = 'Create an account';

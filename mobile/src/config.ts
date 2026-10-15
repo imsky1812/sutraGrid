@@ -30,3 +30,15 @@ export const missingConfig: string[] = [
 ];
 
 export const config = { supabaseUrl, supabaseAnonKey };
+
+/**
+ * Where an email confirmation link lands. It has to be a real page on the web:
+ * a phone cannot open the app from a plain https link, and without this
+ * Supabase falls back to its default site URL, localhost:3000, which is a dead
+ * page on anyone's phone. The email is confirmed by Supabase before the
+ * redirect either way; this page just tells the person so and sends them back.
+ *
+ * Supabase only honours it if the URL is on the project's redirect allow-list
+ * (Authentication > URL Configuration).
+ */
+export const EMAIL_CONFIRMED_URL = 'https://sutra-control.expo.app/confirmed.html';
