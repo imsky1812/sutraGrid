@@ -21,11 +21,26 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import './env.mjs';
 import { createClient } from '@supabase/supabase-js';
-import { batches, bboxAround, overpassQuery, segmentsFromWays } from './roads.mjs';
+import { batches, bboxAround, overpassQuery, segmentsFromWays, tiles, uniqueWays } from './roads.mjs';
+
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const OVERPASS = (process.env.OVERPASS_URLS ?? 'https://overpass-api.de/api/interpreter,https://overpass.kumi.systems/api/interpreter')
+// Public instances listed on the OpenStreetMap wiki. Any one of them can be
+// down or rate-limiting at a given moment (on 16 October overpass-api.de
+// returned 502 for its own status page while the mail.ru mirror answered), so
+// each request walks the list.
+const OVERPASS = (
+  process.env.OVERPASS_URLS ??
+  [
+    'https://overpass-api.de/api/interpreter',
+    'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+    'https://overpass.private.coffee/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
+  ].join(',')
+)
   .split(',')
   .map((u) => u.trim());
 
@@ -46,7 +61,8 @@ function config() {
   };
 }
 
-async function fetchRoads(bbox) {
+/** One tile, from whichever server will answer. Null if none would. */
+async function fetchTile(bbox) {
   const body = `data=${encodeURIComponent(overpassQuery(bbox))}`;
   for (const url of OVERPASS) {
     try {
@@ -62,15 +78,41 @@ async function fetchRoads(bbox) {
         signal: AbortSignal.timeout(120_000),
       });
       if (!response.ok) {
-        console.warn(`${url}: ${response.status}`);
+        console.warn(`  ${new URL(url).host}: ${response.status}`);
         continue;
       }
       return (await response.json()).elements ?? [];
     } catch (e) {
-      console.warn(`${url}: ${e.message}`);
+      console.warn(`  ${new URL(url).host}: ${e.message}`);
     }
   }
-  throw new Error('Every Overpass server refused or timed out. Try again in a minute.');
+  return null;
+}
+
+/** A tile from whichever server answers, retrying after a pause if none will. */
+async function fetchTileWithRetry(bbox, index, total) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    if (attempt > 1) {
+      console.warn(`  every server refused tile ${index}/${total}; trying again in ${attempt * 20}s`);
+      await pause(attempt * 20_000);
+    }
+    const elements = await fetchTile(bbox);
+    if (elements !== null) return elements;
+  }
+  return null;
+}
+
+/** Replace these roads: clear any earlier copy of each way, then insert. */
+async function writeSegments(supabase, rows) {
+  const wayIds = [...new Set(rows.map((r) => r.osm_way_id))];
+  for (const ids of batches(wayIds, 300)) {
+    const { error } = await supabase.from('road_segments').delete().in('osm_way_id', ids);
+    if (error) throw new Error(`Could not clear old segments: ${error.message}`);
+  }
+  for (const batch of batches(rows, 500)) {
+    const { error } = await supabase.from('road_segments').insert(batch);
+    if (error) throw new Error(`Insert failed: ${error.message}`);
+  }
 }
 
 async function main() {
@@ -112,36 +154,46 @@ async function main() {
   if (bbox.length !== 4 || bbox.some((v) => !Number.isFinite(v))) {
     throw new Error('Box must be south,west,north,east.');
   }
-  console.log(`Fetching roads in ${bbox.join(', ')}…`);
+  const parts = tiles(bbox);
+  console.log(`Fetching roads in ${bbox.join(', ')} as ${parts.length} tile(s)…`);
 
-  const ways = await fetchRoads(bbox);
-  const rows = segmentsFromWays(ways);
-  const oneway = rows.filter((r) => r.oneway).length;
-  const limits = rows.filter((r) => r.maxspeed_kmh).length;
+  // Each tile is written as it arrives. If the servers give out part-way, what
+  // was loaded stays loaded, and running the same command again finishes it:
+  // every road replaces its own earlier copy, so repeats are harmless.
+  const seen = new Set();
+  let roads = 0;
+  let segments = 0;
+  let oneway = 0;
+  let limits = 0;
+
+  for (let i = 0; i < parts.length; i++) {
+    // A pause between requests keeps a public server from rate-limiting us.
+    if (i > 0) await pause(3_000);
+    const elements = await fetchTileWithRetry(parts[i], i + 1, parts.length);
+    if (elements === null) {
+      throw new Error(
+        `Every Overpass server refused tile ${i + 1} of ${parts.length}. ` +
+          (dryRun ? 'Try again later.' : `Tiles 1-${i} are saved; run the same command again to finish.`),
+      );
+    }
+
+    // A road crossing a tile edge comes back whole from both; count it once.
+    const fresh = uniqueWays(elements).filter((w) => !seen.has(w.id));
+    fresh.forEach((w) => seen.add(w.id));
+    const rows = segmentsFromWays(fresh);
+    roads += fresh.length;
+    segments += rows.length;
+    oneway += rows.filter((r) => r.oneway).length;
+    limits += rows.filter((r) => r.maxspeed_kmh).length;
+
+    if (!dryRun && rows.length > 0) await writeSegments(supabase, rows);
+    console.log(`  tile ${i + 1}/${parts.length}: ${fresh.length} roads, ${rows.length} segments${dryRun ? '' : ' written'}`);
+  }
+
   console.log(
-    `${ways.length} roads, ${rows.length} segments: ${oneway} one-way, ${limits} with a posted speed limit.`,
+    `${roads} roads, ${segments} segments: ${oneway} one-way, ${limits} with a posted speed limit.`,
   );
-
-  if (dryRun) {
-    console.log('Dry run: nothing written.');
-    return;
-  }
-
-  // Replace rather than duplicate: clear these ways first.
-  const wayIds = [...new Set(rows.map((r) => r.osm_way_id))];
-  for (const ids of batches(wayIds, 300)) {
-    const { error } = await supabase.from('road_segments').delete().in('osm_way_id', ids);
-    if (error) throw new Error(`Could not clear old segments: ${error.message}`);
-  }
-
-  let written = 0;
-  for (const batch of batches(rows, 500)) {
-    const { error } = await supabase.from('road_segments').insert(batch);
-    if (error) throw new Error(`Insert failed after ${written} segments: ${error.message}`);
-    written += batch.length;
-    process.stdout.write(`\r${written}/${rows.length} segments written`);
-  }
-  console.log('\nDone. Wrong-way checks now cover this area.');
+  console.log(dryRun ? 'Dry run: nothing written.' : 'Done. Wrong-way checks now cover this area.');
 }
 
 main().catch((e) => {

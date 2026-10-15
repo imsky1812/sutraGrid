@@ -40,3 +40,6 @@ mobile/dashboard-dist/
 # google-services.json is different - public identifiers - and may be committed.
 *firebase-adminsdk*.json
 *service-account*.json
+
+# Credentials the tools sign in with. Never commit.
+tools/.env

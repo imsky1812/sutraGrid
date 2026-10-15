@@ -22,6 +22,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import './env.mjs';
 import { createClient } from '@supabase/supabase-js';
 import { createDriver, pickDestination, plateFor, SIM_PLATE_PREFIX } from './simulator.mjs';
 

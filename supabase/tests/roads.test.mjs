@@ -13,6 +13,8 @@ import {
   onewayOf,
   overpassQuery,
   segmentsFromWays,
+  tiles,
+  uniqueWays,
 } from '../../tools/roads.mjs';
 
 const way = (id, tags, coords) => ({
@@ -141,4 +143,27 @@ test('batches cover every row exactly once', () => {
   const b = batches(rows, 500);
   assert.deepEqual(b.map((x) => x.length), [500, 500, 234]);
   assert.equal(b.flat().length, 1234);
+});
+
+describe('large areas', () => {
+  // Public servers refuse a big query long before several small ones.
+  test('are split into tiles that cover the whole box, without gaps', () => {
+    const box = [28.59, 77.40, 28.65, 77.47];
+    const parts = tiles(box, 0.015);
+    assert.equal(parts.length, 4 * 5);
+    const area = (b) => (b[2] - b[0]) * (b[3] - b[1]);
+    const total = parts.reduce((m, b) => m + area(b), 0);
+    assert.ok(Math.abs(total - area(box)) < 1e-9);
+    assert.ok(parts.every((b) => b[2] - b[0] <= 0.015 + 1e-9 && b[3] - b[1] <= 0.015 + 1e-9));
+  });
+
+  test('a small area stays one request', () => {
+    assert.equal(tiles([28.6, 77.4, 28.61, 77.41], 0.015).length, 1);
+  });
+
+  // A road crossing a tile edge comes back from both tiles, whole each time.
+  test('a road seen by two tiles is kept once', () => {
+    const w = way(7, { highway: 'primary' }, [[28.6, 77.2], [28.61, 77.2]]);
+    assert.equal(uniqueWays([w, { ...w }, way(8, {}, [[1, 1], [2, 2]])]).length, 2);
+  });
 });

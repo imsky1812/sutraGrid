@@ -98,6 +98,37 @@ export function segmentsFromWays(elements) {
   return rows;
 }
 
+/**
+ * Split a box into tiles no bigger than `maxSpanDeg` on a side. A public
+ * Overpass server refuses or times out a big query long before it struggles
+ * with several small ones, so a 6 km area is fetched as a handful of tiles.
+ */
+export function tiles([south, west, north, east], maxSpanDeg = 0.015) {
+  const rows = Math.max(1, Math.ceil((north - south) / maxSpanDeg));
+  const cols = Math.max(1, Math.ceil((east - west) / maxSpanDeg));
+  const dLat = (north - south) / rows;
+  const dLng = (east - west) / cols;
+  const out = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      out.push([
+        south + r * dLat,
+        west + c * dLng,
+        south + (r + 1) * dLat,
+        west + (c + 1) * dLng,
+      ].map((v) => Number(v.toFixed(6))));
+    }
+  }
+  return out;
+}
+
+/** A road crossing a tile edge comes back from both tiles; keep it once. */
+export function uniqueWays(elements) {
+  const seen = new Map();
+  for (const e of elements) if (e?.type === 'way' && !seen.has(e.id)) seen.set(e.id, e);
+  return [...seen.values()];
+}
+
 /** Split into batches so one insert does not exceed request limits. */
 export function batches(rows, size = 500) {
   const out = [];
