@@ -200,6 +200,9 @@ the phone and a corridor starts without junctions if both fail.
 | `corridors`, `corridor_route_points`, `corridor_signals`, `corridor_warnings` | Green corridors: route, simulated junction states, drivers warned |
 | `operators`, `operator_invites` | Who may watch the whole fleet |
 | `device_tokens` | Which phone is in which vehicle, for push |
+| `events` | Everything that happens to a vehicle, in a fixed set of kinds |
+| `zones`, `zone_presence` | Operator-drawn areas, and who is inside them |
+| `road_segments` | OpenStreetMap roads: direction, one-way, posted limit |
 | *(function)* `nearby_vehicles()` | What a driver may see around them, with identities stripped |
 | `settings` | Speed limit, shared by trigger and clients |
 | `retention_policy` | Prune windows, as data rather than code |
@@ -276,8 +279,11 @@ cd admin-dashboard && python -m http.server 8080
 Deploy with `cd mobile && npx eas deploy --export-dir dashboard-dist`.
 
 Supabase needs to know where auth emails may return to. In
-**Authentication → URL Configuration**, set the site URL to the deployed
-dashboard and list it under redirect URLs. The dashboard derives its own
+**Authentication → URL Configuration**, set the site URL to
+`https://sutra-control.expo.app/confirmed.html` and add
+`https://sutra-control.expo.app/**` under redirect URLs. Left at the default,
+confirmation emails link to `localhost:3000`, a dead page on a phone - the
+email is still confirmed, but it looks like a failure. The dashboard derives its own
 redirect from `window.location.origin`, so it follows wherever it is served -
 but Supabase will only honour an address on that list.
 
@@ -307,8 +313,8 @@ npm run apk              # gradlew assembleDebug with ninja parallelism capped
 ## Testing
 
 ```bash
-cd mobile         && npm test && npm run typecheck   # 172 tests
-cd supabase/tests && npm install && npm test         # 242 tests
+cd mobile         && npm test && npm run typecheck   # 184 tests
+cd supabase/tests && npm install && npm test         # 326 tests
 ```
 
 Schema and RLS tests run against **PGlite** — Postgres compiled to WASM, in
@@ -391,6 +397,49 @@ The console's Insights lists a vehicle's trips; any of them replays on the map
 with a moving marker, the speed at each moment, and a pin wherever a rule was
 broken. *Speeding map* draws a heatmap of the last 30 days weighted by how far
 over the limit. Drivers see their own week under *Trips and history*.
+
+## Collision warnings
+
+When two vehicles are heading for the same point, both are warned a few
+seconds ahead and told which side the other is coming from. It is closest
+point of approach on current speed and heading, limited on purpose to paths
+crossing at 30-150 degrees: phone GPS is good to 5-10 m and lanes are 3.5 m
+apart, so a plain proximity test fires on every oncoming car and overtake.
+Braking drivers, parked vehicles and stale positions are skipped. Thresholds
+(`conflict_*`) are rows in `settings`, tunable without a deploy.
+
+## Harsh braking and wrong way
+
+Harsh braking (`harsh_brake_mps2`, 0.4 g by default) is the speed drop between
+two fixes; it is recorded but never announced, because beeping at someone just
+after an emergency stop distracts them at the worst moment.
+
+Wrong way needs to know which roads are one-way. Load OpenStreetMap roads for
+each area you operate in:
+
+```bash
+cd tools && SUTRA_EMAIL=ops@example.com SUTRA_PASSWORD=...   node import-roads.mjs --near 28.6241,77.4356 --radius 3000
+```
+
+It runs from a laptop because the public Overpass servers refuse Supabase's
+runtime. Three fixes in a row against a one-way road, above 10 km/h, with no
+road nearby the vehicle may legally be on (the far side of a dual carriageway
+is often within GPS error), flags it and alerts the driver. Areas without
+imported roads are simply not checked.
+
+Every one of these checks runs inside the phone's position update, so each
+logs and lets the position through if it ever fails.
+
+## Zones and events
+
+Operators draw zones on the console's map (school, hospital, restricted,
+depot). Entering or leaving one is recorded, and a zone can carry a message
+sent to the driver on entry, which arrives by push like any alert. Leaving
+takes two fixes outside, so GPS jitter on a boundary does not flap.
+
+Everything that happens to a vehicle - zone crossings, speeding, harsh braking,
+wrong way, collision warnings, corridor start and end - lands in one `events`
+table, which the console's log reads live. Events are kept 30 days.
 
 ## Roadmap
 

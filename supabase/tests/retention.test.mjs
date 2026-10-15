@@ -84,6 +84,9 @@ test('windows are data, not hardcoded in the function', async () => {
 test('pruning an empty database is harmless', async () => {
   const db = await setup();
   const { rows } = await prune(db);
-  assert.equal(rows.length, 4);
+  assert.deepEqual(
+    rows.map((r) => r.pruned_table).sort(),
+    ['alerts', 'corridors', 'events', 'position_history', 'violations'],
+  );
   assert.ok(rows.every((r) => Number(r.removed) === 0));
 });

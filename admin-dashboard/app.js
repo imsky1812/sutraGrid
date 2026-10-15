@@ -105,6 +105,7 @@ async function enterConsole() {
   $('console').hidden = false;
   $('events-label').textContent = state.isOperator ? 'Fleet events' : 'My events';
   $('open-vehicles').hidden = !state.isOperator;
+  $('open-zones').hidden = !state.isOperator;
   await startConsole();
 }
 
@@ -900,7 +901,7 @@ async function loadViolationCount() {
     .select('id', { count: 'exact', head: true })
     .gte('occurred_at', since);
   state.violations = count ?? 0;
-  $('violation-count').textContent = `${state.violations} speeding`;
+  $('violation-count').textContent = `${state.violations} rule breaks`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1364,6 +1365,7 @@ function setPlaying(playing) {
 }
 
 async function startReplay(vehicleId, trip) {
+  if (state.draft) stopDrawing();
   stopReplay();
   closeDrawer();
   const bar = $('replay');
@@ -1556,6 +1558,382 @@ async function toggleHeatmap() {
 
 $('toggle-heatmap').addEventListener('click', toggleHeatmap);
 
+// ---------------------------------------------------------------------------
+// Events
+//
+// Everything the database notices about a vehicle - zone crossings, rule
+// breaks, collision warnings, corridors - lands in one events table, and the
+// log reads from it. Row-level security scopes it like everything else.
+// ---------------------------------------------------------------------------
+
+const EVENT_LABEL = {
+  ZONE_ENTER: 'Entered zone',
+  ZONE_EXIT: 'Left zone',
+  OVERSPEED: 'Speeding',
+  HARSH_BRAKE: 'Harsh braking',
+  WRONG_WAY: 'Wrong way',
+  CONFLICT: 'Collision warning',
+  CORRIDOR_START: 'Green corridor opened',
+  CORRIDOR_END: 'Green corridor ended',
+};
+
+/** The log's colour: red for anything a driver did wrong or was warned about. */
+const EVENT_TONE = {
+  OVERSPEED: 'violation',
+  HARSH_BRAKE: 'violation',
+  WRONG_WAY: 'violation',
+  CONFLICT: 'violation',
+};
+
+function describeEvent(e) {
+  const d = e.detail ?? {};
+  switch (e.kind) {
+    case 'ZONE_ENTER':
+      return d.zone ?? 'Zone';
+    case 'ZONE_EXIT':
+      return `${d.zone ?? 'Zone'}${d.minutes_inside !== undefined ? ` after ${d.minutes_inside} min` : ''}`;
+    case 'OVERSPEED':
+      return `${d.speed} km/h in a ${d.limit} km/h zone`;
+    case 'HARSH_BRAKE':
+      return d.from_kmh !== undefined ? `${d.from_kmh} to ${d.to_kmh} km/h in ${d.seconds}s` : 'Braked hard';
+    case 'WRONG_WAY':
+      return `Against one-way ${d.road ?? 'road'}`;
+    case 'CONFLICT':
+      return `Crossing paths at ${d.speed ?? '?'} km/h`;
+    case 'CORRIDOR_START':
+      return `To ${d.destination ?? 'destination'}`;
+    case 'CORRIDOR_END':
+      return `${d.destination ?? 'Destination'}${d.minutes !== undefined ? ` · ${d.minutes} min` : ''}`;
+    default:
+      return '';
+  }
+}
+
+function logFleetEvent(e) {
+  const entry = state.fleet.get(e.vehicle_id);
+  const who = entry ? plate(entry) : 'Vehicle';
+  pushLog(
+    el('div', { className: `event ${EVENT_TONE[e.kind] ?? 'alert'}` }, [
+      el('div', {}, [
+        el('strong', { text: `${EVENT_LABEL[e.kind] ?? e.kind} · ${who}` }),
+        el('br'),
+        el('span', { className: 'muted', text: describeEvent(e) }),
+      ]),
+      el('time', { text: new Date(e.occurred_at).toLocaleTimeString() }),
+    ]),
+  );
+}
+
+/** The last few events, so a console opened mid-shift has context. */
+async function loadRecentEvents() {
+  const { data, error } = await supabase
+    .from('events')
+    .select('vehicle_id, kind, occurred_at, detail')
+    .order('occurred_at', { ascending: false })
+    .limit(25);
+  if (error) return;
+  // Oldest first, since the log puts each new entry on top.
+  (data ?? []).reverse().forEach(logFleetEvent);
+}
+
+// ---------------------------------------------------------------------------
+// Zones
+//
+// Named areas an operator draws on the map. Crossing one is an event, and a
+// zone can carry a message the driver is sent on entering - which, like every
+// alert, also arrives by push when their app is closed.
+// ---------------------------------------------------------------------------
+
+const ZONE_KINDS = {
+  SCHOOL: { label: 'School', color: '#F5B63B', message: 'School zone: slow down, children crossing.' },
+  HOSPITAL: { label: 'Hospital', color: '#22C55E', message: 'Hospital zone: slow down and do not use the horn.' },
+  RESTRICTED: { label: 'Restricted', color: '#FF6B5A', message: 'Restricted area: authorised vehicles only.' },
+  DEPOT: { label: 'Depot', color: '#7BA7FF', message: '' },
+  CUSTOM: { label: 'Other', color: '#D7F94A', message: '' },
+};
+
+state.zones = [];
+state.draft = null;
+
+function zoneFeatures(zones) {
+  return {
+    type: 'FeatureCollection',
+    features: zones
+      .filter((z) => z.active)
+      .map((z) => ({
+        type: 'Feature',
+        properties: { name: z.name, color: ZONE_KINDS[z.kind]?.color ?? '#D7F94A' },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [[...z.polygon, z.polygon[0]].map(([lat, lng]) => [lng, lat])],
+        },
+      })),
+  };
+}
+
+function drawZones() {
+  const map = state.map;
+  if (!map) return;
+  const paint = () => {
+    const data = zoneFeatures(state.zones);
+    if (map.getSource('zones')) {
+      map.getSource('zones').setData(data);
+      return;
+    }
+    map.addSource('zones', { type: 'geojson', data });
+    map.addLayer({
+      id: 'zones-fill',
+      type: 'fill',
+      source: 'zones',
+      paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.12 },
+    });
+    map.addLayer({
+      id: 'zones-line',
+      type: 'line',
+      source: 'zones',
+      paint: { 'line-color': ['get', 'color'], 'line-width': 2, 'line-dasharray': [2, 1] },
+    });
+  };
+  if (map.isStyleLoaded()) paint();
+  else map.once('load', paint);
+}
+
+async function loadZones() {
+  const { data, error } = await supabase
+    .from('zones')
+    .select('id, name, kind, polygon, alert_message, active')
+    .order('created_at', { ascending: false });
+  if (error) {
+    logEvent('violation', 'Could not load zones', error.message);
+    return;
+  }
+  state.zones = data ?? [];
+  drawZones();
+}
+
+function paintDraft() {
+  const map = state.map;
+  const points = state.draft?.points ?? [];
+  const data = {
+    type: 'FeatureCollection',
+    features: [
+      ...points.map(([lat, lng]) => ({
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'Point', coordinates: [lng, lat] },
+      })),
+      ...(points.length > 1
+        ? [{
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'LineString',
+              coordinates: [...points, ...(points.length > 2 ? [points[0]] : [])].map(([lat, lng]) => [lng, lat]),
+            },
+          }]
+        : []),
+    ],
+  };
+  if (map.getSource('zone-draft')) {
+    map.getSource('zone-draft').setData(data);
+    return;
+  }
+  map.addSource('zone-draft', { type: 'geojson', data });
+  map.addLayer({
+    id: 'zone-draft-line',
+    type: 'line',
+    source: 'zone-draft',
+    paint: { 'line-color': '#D7F94A', 'line-width': 2 },
+  });
+  map.addLayer({
+    id: 'zone-draft-points',
+    type: 'circle',
+    source: 'zone-draft',
+    filter: ['==', '$type', 'Point'],
+    paint: { 'circle-radius': 5, 'circle-color': '#D7F94A', 'circle-stroke-color': '#0D0F0B', 'circle-stroke-width': 2 },
+  });
+}
+
+function onDraftClick(e) {
+  if (!state.draft) return;
+  state.draft.points.push([e.lngLat.lat, e.lngLat.lng]);
+  paintDraft();
+  renderDraftBar();
+}
+
+function stopDrawing() {
+  const map = state.map;
+  state.draft = null;
+  map.off('click', onDraftClick);
+  map.getCanvas().style.cursor = '';
+  ['zone-draft-points', 'zone-draft-line'].forEach((id) => map.getLayer(id) && map.removeLayer(id));
+  if (map.getSource('zone-draft')) map.removeSource('zone-draft');
+  const bar = $('replay');
+  bar.hidden = true;
+  clear(bar);
+}
+
+/** The bar along the bottom of the map while a zone is being drawn. */
+function renderDraftBar() {
+  const bar = $('replay');
+  bar.hidden = false;
+  clear(bar);
+  const n = state.draft.points.length;
+  bar.appendChild(
+    el('span', {
+      className: 'replay-caption',
+      text: n < 3
+        ? `Click the map to place each corner of the zone (${n} of at least 3).`
+        : `${n} corners. Keep clicking to add more, or finish.`,
+    }),
+  );
+  const undo = el('button', { className: 'btn', text: 'Undo' });
+  undo.disabled = n === 0;
+  undo.addEventListener('click', () => {
+    state.draft.points.pop();
+    paintDraft();
+    renderDraftBar();
+  });
+  const finish = el('button', { className: 'btn accent', text: 'Finish' });
+  finish.disabled = n < 3;
+  finish.addEventListener('click', () => describeDraft(state.draft.points.slice()));
+  const cancel = el('button', { className: 'btn', text: 'Cancel' });
+  cancel.addEventListener('click', stopDrawing);
+  bar.appendChild(undo);
+  bar.appendChild(finish);
+  bar.appendChild(cancel);
+}
+
+function startDrawing() {
+  stopReplay();
+  closeDrawer();
+  state.draft = { points: [] };
+  state.map.getCanvas().style.cursor = 'crosshair';
+  state.map.on('click', onDraftClick);
+  renderDraftBar();
+}
+
+/** Name the zone, say what kind it is, and what a driver should be told. */
+function describeDraft(points) {
+  drawerShell('New zone');
+
+  const name = el('input', { className: 'field' });
+  name.placeholder = 'e.g. St Mary’s School';
+  name.maxLength = 80;
+
+  const kind = el('select', { className: 'field' });
+  Object.entries(ZONE_KINDS).forEach(([value, k]) => {
+    const option = el('option', { text: k.label });
+    option.value = value;
+    kind.appendChild(option);
+  });
+
+  const message = el('textarea', { className: 'field' });
+  message.rows = 3;
+  message.maxLength = 200;
+  message.value = ZONE_KINDS.SCHOOL.message;
+  kind.addEventListener('change', () => {
+    message.value = ZONE_KINDS[kind.value].message;
+  });
+
+  const status = el('small', { className: 'error' });
+  status.hidden = true;
+  const save = el('button', { className: 'btn accent', text: 'Save zone' });
+
+  save.addEventListener('click', async () => {
+    if (!name.value.trim()) {
+      status.textContent = 'Give the zone a name.';
+      status.hidden = false;
+      return;
+    }
+    save.disabled = true;
+    const { error } = await supabase.from('zones').insert({
+      name: name.value.trim(),
+      kind: kind.value,
+      polygon: points,
+      alert_message: message.value.trim() || null,
+    });
+    if (error) {
+      status.textContent = error.message;
+      status.hidden = false;
+      save.disabled = false;
+      return;
+    }
+    stopDrawing();
+    logEvent('alert', 'Zone saved', name.value.trim());
+    await loadZones();
+    openZones();
+  });
+
+  drawer.appendChild(el('label', { className: 'label', text: 'Name' }));
+  drawer.appendChild(name);
+  drawer.appendChild(el('label', { className: 'label', text: 'Kind' }));
+  drawer.appendChild(kind);
+  drawer.appendChild(el('label', { className: 'label', text: 'Told to a driver on entering (optional)' }));
+  drawer.appendChild(message);
+  drawer.appendChild(
+    el('p', {
+      className: 'muted',
+      text: 'Leave it empty to record entries and exits without telling the driver anything.',
+    }),
+  );
+  drawer.appendChild(status);
+  drawer.appendChild(save);
+}
+
+function openZones() {
+  drawerShell('Zones');
+  drawer.appendChild(
+    el('p', {
+      className: 'muted',
+      text: 'Entering or leaving a zone is recorded. A zone with a message tells the driver on the way in, by push if their app is closed.',
+    }),
+  );
+
+  const draw = el('button', { className: 'btn accent', text: 'Draw a new zone' });
+  draw.addEventListener('click', startDrawing);
+  drawer.appendChild(draw);
+
+  if (state.zones.length === 0) {
+    drawer.appendChild(el('p', { className: 'muted', text: 'No zones yet.' }));
+    return;
+  }
+
+  const list = el('div', { className: 'admin-list' });
+  state.zones.forEach((z) => {
+    const row = el('div', { className: 'admin-row' });
+    row.appendChild(
+      el('div', { className: 'admin-head' }, [
+        el('strong', { text: z.name }),
+        el('span', { className: z.active ? 'tag granted' : 'tag', text: ZONE_KINDS[z.kind]?.label ?? z.kind }),
+      ]),
+    );
+    if (z.alert_message) row.appendChild(el('small', { className: 'muted', text: `“${z.alert_message}”` }));
+
+    const toggle = el('button', { className: 'btn', text: z.active ? 'Switch off' : 'Switch on' });
+    toggle.addEventListener('click', async () => {
+      toggle.disabled = true;
+      const { error } = await supabase.from('zones').update({ active: !z.active }).eq('id', z.id);
+      if (error) logEvent('violation', 'Could not change zone', error.message);
+      await loadZones();
+      openZones();
+    });
+    const remove = el('button', { className: 'btn', text: 'Delete' });
+    remove.addEventListener('click', async () => {
+      remove.disabled = true;
+      const { error } = await supabase.from('zones').delete().eq('id', z.id);
+      if (error) logEvent('violation', 'Could not delete zone', error.message);
+      await loadZones();
+      openZones();
+    });
+    row.appendChild(el('div', { className: 'admin-actions' }, [toggle, remove]));
+    list.appendChild(row);
+  });
+  drawer.appendChild(list);
+}
+
+$('open-zones').addEventListener('click', openZones);
+
 async function startConsole() {
   // The map is the most fragile part of the console: MapLibre needs WebGL, and
   // throws if the browser or GPU cannot provide it. Losing the map should not
@@ -1579,6 +1957,8 @@ async function startConsole() {
 
   await reconcile();
   loadCorridors();
+  loadZones();
+  loadRecentEvents();
   subscribeToFleet();
 
   // Realtime is the fast path, not the only one. A laptop that slept, a tunnel,
@@ -1686,10 +2066,8 @@ function subscribeToFleet() {
     })
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'violations' }, (payload) => {
       state.violations += 1;
-      $('violation-count').textContent = `${state.violations} speeding`;
-      const entry = state.fleet.get(payload.new.vehicle_id);
-      const d = describeViolation(payload.new);
-      logEvent('violation', d.headline, `${entry ? plate(entry) : 'Vehicle'} · ${d.why}`);
+      $('violation-count').textContent = `${state.violations} rule breaks`;
+      // Logged from the events table instead, which records every kind.
     })
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'alerts' }, (payload) => {
       const entry = payload.new.vehicle_id ? state.fleet.get(payload.new.vehicle_id) : null;
@@ -1702,6 +2080,9 @@ function subscribeToFleet() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'corridors' }, onCorridorChange)
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'corridor_signals' }, onSignalChange)
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'corridor_warnings' }, onWarning)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'events' }, (payload) =>
+      logFleetEvent(payload.new),
+    )
     .subscribe((status) => {
       if (status === 'SUBSCRIBED') {
         state.channelState = 'joined';

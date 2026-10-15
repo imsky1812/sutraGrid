@@ -265,11 +265,11 @@
   <tr><td>2</td><td>Live surroundings view — radar + map toggle</td><td><span class="tag done">Done · 15 Oct</span></td></tr>
   <tr><td>3</td><td>Vehicle simulator</td><td><span class="tag done">Done · 15 Oct</span></td></tr>
   <tr><td>4</td><td>Real-device demo run</td><td><span class="tag high">High</span></td></tr>
-  <tr><td>5</td><td>Push to a closed app (FCM)</td><td><span class="tag done">Built · 15 Oct</span> <span class="tag med">Needs Firebase</span></td></tr>
+  <tr><td>5</td><td>Push to a closed app (FCM)</td><td><span class="tag done">Built · 15 Oct</span> <span class="tag med">Phone test pending</span></td></tr>
   <tr><td>6</td><td>Trip replay + violations view</td><td><span class="tag done">Done · 16 Oct</span></td></tr>
-  <tr><td>7</td><td>Collision / near-miss warning</td><td><span class="tag med">Medium</span></td></tr>
-  <tr><td>8</td><td>Richer violation types</td><td><span class="tag med">Medium</span></td></tr>
-  <tr><td>9</td><td>Geofencing + event engine</td><td><span class="tag med">Medium</span></td></tr>
+  <tr><td>7</td><td>Collision / near-miss warning</td><td><span class="tag done">Done · 16 Oct</span></td></tr>
+  <tr><td>8</td><td>Richer violation types</td><td><span class="tag done">Done · 16 Oct</span></td></tr>
+  <tr><td>9</td><td>Geofencing + event engine</td><td><span class="tag done">Done · 16 Oct</span></td></tr>
   <tr><td>10</td><td>PostGIS spatial queries</td><td><span class="tag med">Medium</span></td></tr>
   <tr><td>11</td><td>Per-road speed limits</td><td><span class="tag low">Low</span></td></tr>
   <tr><td>12</td><td>Signal-adapter interface</td><td><span class="tag low">Low — pitch value</span></td></tr>
@@ -462,7 +462,7 @@
     <span class="phase-no">PHASE 5</span>
     <h3>Push to a closed app</h3>
     <span class="tag done">Built · 15 Oct</span>
-    <span class="tag med">Awaiting Firebase</span>
+    <span class="tag med">Phone test pending</span>
   </div>
   <p>
     Every notification today is <em>local</em>: an alert arrives over the open
@@ -557,8 +557,26 @@
   <div class="phase-head">
     <span class="phase-no">PHASE 7</span>
     <h3>Collision / near-miss warning</h3>
-    <span class="tag med">Medium — strongest safety story</span>
+    <span class="tag done">Done · 16 Oct</span>
   </div>
+  <div class="callout">
+    <p>
+      <strong>Scoped to what phone GPS can support.</strong> GPS is good to
+      5–10&nbsp;m and lanes are 3.5&nbsp;m apart, so a plain "they will pass
+      within 12&nbsp;m" test fires on every oncoming car and every overtake —
+      those genuinely pass within 4&nbsp;m. Only paths crossing at 30–150° are
+      considered: the junction case, where drivers often cannot see each other.
+      Rear-end and lane-change warnings need lane-level positioning and are not
+      attempted. Braking drivers, parked vehicles and stale positions are
+      skipped; each pair is warned once per encounter, and each driver is told
+      which side the danger is on.
+    </p>
+  </div>
+  <p><strong>Shipped and live:</strong> rehearsed with the two real vehicles —
+    the ambulance told "from your left", the other car "from your right". 18
+    tests, most of them cases that must stay silent, plus one proving a failure
+    in the check can never stop a phone's tracking (it caught that settings
+    read in a PL/pgSQL <code>DECLARE</code> escape the exception handler).</p>
   <p>
     A trigger beside the corridor one: for vehicles within a few hundred metres,
     project both forward and compute time to closest approach; warn both when
@@ -573,7 +591,28 @@
   <div class="phase-head">
     <span class="phase-no">PHASE 8</span>
     <h3>Richer violation types</h3>
-    <span class="tag med">Medium</span>
+    <span class="tag done">Done · 16 Oct</span>
+  </div>
+  <p><strong>Shipped and live.</strong> Adding a second kind exposed two
+    assumptions the speeding code had made: it took "the open violation"
+    without asking its kind, and the alert trigger said "Overspeeding" for
+    everything. Both fixed first.</p>
+  <ul>
+    <li><strong>Harsh braking</strong> (0.4&nbsp;g, a setting): recorded, never
+      announced — beeping at someone in the second after an emergency stop
+      distracts them at the worst moment.</li>
+    <li><strong>Wrong way</strong> uses OpenStreetMap roads loaded by
+      <code>tools/import-roads.mjs</code> (from a laptop: Overpass refuses
+      Supabase's runtime). Three consecutive fixes against a one-way road,
+      above 10&nbsp;km/h, and no road nearby the vehicle may legally be on — on
+      a dual carriageway the opposite side is within GPS error. The driver
+      gets an URGENT alert naming the road. Around the test phones the
+      importer found 1,774 roads and 9,298 segments.</li>
+  </ul>
+  <div class="callout warn">
+    <p><strong>Needs you:</strong> wrong-way checks only cover areas whose
+      roads have been imported. Run the importer once for each area you
+      operate in.</p>
   </div>
   <ul>
     <li><strong>Harsh braking</strong> — deceleration against the previous
@@ -589,8 +628,17 @@
   <div class="phase-head">
     <span class="phase-no">PHASE 9</span>
     <h3>Geofencing and an event engine</h3>
-    <span class="tag med">Medium</span>
+    <span class="tag done">Done · 16 Oct</span>
   </div>
+  <p><strong>Shipped and live.</strong> One <code>events</code> table with a
+    fixed set of kinds that every check now writes into: zone enter/exit,
+    overspeed, harsh brake, wrong way, collision warning, corridor start/end.
+    The console's log reads from it live. Operators draw zones on the map
+    (school, hospital, restricted, depot); a zone can carry a message sent to
+    the driver on entry — "School zone: slow down, children crossing" — which
+    arrives by push like any alert. Leaving takes two fixes outside, so GPS
+    jitter on a boundary does not flap, and re-entering within two minutes is
+    the same visit. Rehearsed live with a test school zone. 17 tests.</p>
   <p>
     Named zones, and one <code>events</code> table with a real taxonomy — zone
     enter and exit, overspeed, harsh brake, conflict, corridor start and end —
@@ -710,6 +758,27 @@
     reconciliation regardless of Realtime</strong>. Realtime is the fast path,
     not the only one, so a stream that silently dies costs seconds of staleness
     rather than a reload.
+  </p>
+</div>
+
+<div class="phase">
+  <div class="phase-head">
+    <span class="phase-no">16 OCT</span>
+    <h3>Email confirmation links opened localhost</h3>
+    <span class="tag bug">Bug</span>
+    <span class="tag done">Fixed</span>
+  </div>
+  <p>
+    Found when a second person signed up on their own phone: the confirmation
+    email's link opened <code>localhost:3000</code>. Neither the app nor the
+    console told Supabase where to send people, so it used its default. The
+    address was in fact already confirmed — Supabase verifies before
+    redirecting, and that account signed in a minute later — but a dead page
+    reads as failure. Both sign-up paths now point at a real page,
+    <code>/confirmed.html</code>, which says what to do next, explains expired
+    or reused links, and strips the sign-in token from the address. The
+    project's Site URL and redirect allow-list have to be set in the Supabase
+    dashboard too.
   </p>
 </div>
 

@@ -356,6 +356,10 @@ flowchart LR
         <li><time>15 Oct</time><div><b>The console now recovers by itself</b><p>Reported from real use: the console had to be reloaded again and again. Nothing rejoined a dropped Realtime channel, the hourly token refresh was never passed to Realtime (so it kept authorizing against an expired one while the socket stayed open), and violations had never been published at all. It now rejoins with backoff, keeps Realtime's token current, and re-reads the live positions every 15 seconds regardless - Realtime is the fast path, not the only one.</p></div></li>
         <li><time>15 Oct</time><div><b>Push to a closed app</b><p>An alert insert now also calls a <code>notify</code> function, which pushes it through Expo to the phone in the addressed vehicle, so the give-way warning reaches a phone whose app has been swiped away. Pushes are sent at most once, never after the alert has expired, and collapse with the alert the open app raises itself. Verified live up to the push service; a notification on a real phone waits on a Firebase project.</p></div></li>
         <li><time>16 Oct</time><div><b>Trips, replay and a speeding map</b><p>Recorded positions are now grouped into trips, built from moving points only - so a parked phone's GPS wobble no longer counts as distance, a flaw the console's "km driven" had. Operators can replay any trip with a moving marker and a pin wherever a rule was broken, and see a heatmap of where speeding happens. Drivers get a Trips and history screen showing their own week.</p></div></li>
+        <li><time>16 Oct</time><div><b>Collision warnings at junctions</b><p>When two vehicles are heading for the same point, both drivers are warned a few seconds ahead and told which side the other is coming from. Deliberately limited to paths that cross at an angle: phone GPS cannot tell lanes apart, so warning about oncoming or overtaking traffic would fire on every passing car.</p></div></li>
+        <li><time>16 Oct</time><div><b>Harsh braking and wrong-way driving</b><p>Two new violation kinds. Harsh braking is recorded but never announced. Wrong-way driving uses OpenStreetMap one-way data loaded by a road importer, needs three fixes in a row, and ignores the opposite carriageway of a divided road; the driver gets an urgent alert naming the road. Two assumptions in the speeding code that only held while it was the only kind were fixed first.</p></div></li>
+        <li><time>16 Oct</time><div><b>Zones and one record of events</b><p>Operators draw zones on the map; entering or leaving one is recorded, and a zone can send the driver a message on the way in, such as a school-zone warning. Every check now writes into a single events table, which the console's log reads live.</p></div></li>
+        <li><time>16 Oct</time><div><b>Email confirmation fixed</b><p>Confirmation emails linked to localhost:3000, a dead page on a phone. Both sign-up paths now land on a real confirmation page on the console.</p></div></li>
         <li><time>22 Sep</time><div><b>Alerts, green corridor, layout</b><p>Beeping alerts and automatic overspeed warnings. The green corridor end to end. Internal database functions locked down. Keyboard and screen-edge alignment fixed across the app. This record added to the repository as <code>docs/project-record.html</code>, kept up to date with every change.</p></div></li>
       </ol>
     </section>
@@ -380,6 +384,8 @@ flowchart LR
         <li>A week of trips per vehicle, each replayable on the map at 1×, 10× or 60× with violations pinned where they happened, plus a heatmap of where speeding happens across the fleet.</li>
         <li>Send alerts to one vehicle or broadcast to all, with category and severity.</li>
         <li>Active green corridors with junction states and drivers warned.</li>
+        <li><b>Zones:</b> draw school, hospital, restricted or depot areas on the map. Crossings are recorded, and a zone can send drivers a message on entry.</li>
+        <li><b>Live event log</b> fed from one events table: zone crossings, speeding, harsh braking, wrong way, collision warnings, corridors.</li>
         <li><b>Vehicles screen:</b> grant or revoke emergency authorization and set the vehicle type for any registered vehicle. Operators only; every change is recorded against the operator who made it.</li>
       </ul>
       <h3>Alerts</h3>
@@ -390,6 +396,9 @@ flowchart LR
             <tr><td>Operator</td><td>Congestion, hazard, rule, message</td><td>On demand</td></tr>
             <tr><td>Database, on speeding</td><td>Rule: “Overspeeding: 95 km/h in a 80 km/h zone”</td><td>Once per speeding episode</td></tr>
             <tr><td>Green corridor</td><td>Emergency: “keep left and give way”</td><td>Once per vehicle per corridor</td></tr>
+            <tr><td>Database, on crossing paths</td><td>Hazard, urgent: “Collision risk: a vehicle is closing from your left, about 4 s away”</td><td>Once per pair per encounter</td></tr>
+            <tr><td>Database, wrong way on a one-way road</td><td>Rule, urgent: “Wrong way: MG Road is one-way”</td><td>Once per road</td></tr>
+            <tr><td>A zone with a message</td><td>Hazard: e.g. “School zone: slow down”</td><td>On entering</td></tr>
           </tbody>
         </table>
       </div>
@@ -436,12 +445,16 @@ flowchart LR
             <tr><td><code>vehicles</code></td><td>One row per vehicle, owned by a driver; emergency flag</td></tr>
             <tr><td><code>vehicle_positions</code></td><td>Live position, one row per vehicle, upserted</td></tr>
             <tr><td><code>position_history</code></td><td>Append-only track, written by trigger</td></tr>
-            <tr><td><code>violations</code></td><td>Speeding episodes: where, when, peak speed</td></tr>
+            <tr><td><code>violations</code></td><td>Speeding episodes, harsh braking and wrong-way driving: where, when, and the detail of each</td></tr>
             <tr><td><code>alerts</code>, <code>alert_receipts</code></td><td>Operator and system alerts, and acknowledgements</td></tr>
             <tr><td><code>corridors</code> and 3 child tables</td><td>Route points, simulated junction states, drivers warned</td></tr>
             <tr><td><code>operators</code>, <code>operator_invites</code></td><td>Who may watch the whole fleet</td></tr>
             <tr><td><code>emergency_grants</code></td><td>Who granted emergency authorization, to which vehicle, when</td></tr>
             <tr><td><code>device_tokens</code></td><td>Which phone is in which vehicle, so a push reaches the right driver</td></tr>
+            <tr><td><code>events</code></td><td>Everything that happens to a vehicle, one row each, in a fixed set of kinds</td></tr>
+            <tr><td><code>zones</code>, <code>zone_presence</code></td><td>Areas drawn by operators, and which vehicles are inside them</td></tr>
+            <tr><td><code>road_segments</code></td><td>OpenStreetMap roads: direction of travel, one-way, posted limits</td></tr>
+            <tr><td><code>conflict_warnings</code>, <code>wrong_way_streaks</code></td><td>Bookkeeping that keeps each warning to once</td></tr>
             <tr><td><i>no table</i> — <code>nearby_vehicles()</code></td><td>What a driver may learn about vehicles around them: position, speed, heading and type, under an opaque per-caller reference</td></tr>
             <tr><td><code>settings</code>, <code>retention_policy</code></td><td>Speed limit (80 km/h); prune windows</td></tr>
           </tbody>
@@ -455,8 +468,8 @@ flowchart LR
         <table>
           <thead><tr><th>Suite</th><th>Count</th><th>Runs on</th></tr></thead>
           <tbody>
-            <tr><td>App: screens, alerts, corridor, telemetry</td><td class="num">172 passing</td><td>Jest</td></tr>
-            <tr><td>Database rules and triggers, Edge Function handlers</td><td class="num">242 passing</td><td>PGlite (Postgres in WASM), no Docker</td></tr>
+            <tr><td>App: screens, alerts, corridor, telemetry</td><td class="num">184 passing</td><td>Jest</td></tr>
+            <tr><td>Database rules and triggers, Edge Function handlers</td><td class="num">326 passing</td><td>PGlite (Postgres in WASM), no Docker</td></tr>
           </tbody>
         </table>
       </div>
@@ -495,7 +508,9 @@ flowchart LR
         <li>Install <code>sutra-vehicle-keyboard-fix.apk</code> and check: the beep on a new alert, text boxes above the keyboard, the layout clear of the status and navigation bars.</li>
         <li>Add <code>https://sutra-control.expo.app</code> to Supabase → Authentication → URL Configuration → Redirect URLs, so password-reset emails return to the console.</li>
         <li>To try a corridor, open <b>Vehicles</b> in the console, set the type to AMBULANCE and press <b>Authorize</b>, then start a shift in that vehicle. Seeing a driver get warned needs a second phone on the route.</li>
-        <li><b>Turn on push:</b> create a Firebase project with an Android app for <code>com.sutra.vehicle</code>; put <code>google-services.json</code> in <code>mobile/</code>; upload the service-account key to EAS (expo.dev → Credentials → FCM V1). Never commit that key. Then rebuild the APK.</li>
+        <li><b>Fix email confirmation for good:</b> in Supabase → Authentication → URL Configuration, set the Site URL to <code>https://sutra-control.expo.app/confirmed.html</code> and add <code>https://sutra-control.expo.app/**</code> to the redirect URLs.</li>
+        <li><b>Import roads</b> for each area you operate in, so wrong-way checks cover it: <code>node tools/import-roads.mjs --near lat,lng --radius 3000</code>.</li>
+        <li><b>Test push:</b> install the latest APK on both phones and start a shift on each, then swipe SUTRA away on one and send it an alert from the console. It should still beep.</li>
         <li>Optional: enable leaked-password protection in Supabase Auth (flagged by the security advisor).</li>
       </ul>
     </section>
