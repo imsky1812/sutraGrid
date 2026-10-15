@@ -290,7 +290,7 @@
 
   <main>
     <header class="doc-head">
-      <div class="eyebrow">Project record · as of 22 September 2026</div>
+      <div class="eyebrow">Project record · as of 15 October 2026</div>
       <h1>SUTRA: live vehicle telemetry and green corridors</h1>
       <p class="lede">An Android app streams each vehicle's position to Supabase. A web console lets traffic control watch the fleet and send alerts, and authorized emergency vehicles can open a green corridor that warns drivers ahead to give way.</p>
       <div class="meta">
@@ -302,7 +302,7 @@
 
     <section id="status">
       <h2>Where it stands</h2>
-      <p>Everything below is built, tested, deployed and pushed to <code>main</code>. The newest APK has not yet been checked on a phone: the beep, the corridor on a real road and the keyboard fix all pass tests but still need a device check.</p>
+      <p>Everything below is built, tested, deployed and pushed to <code>main</code>. On 22 September the app streamed positions and acknowledged alerts from a real phone, so delivery works end to end. Still unchecked on a device: the beep itself, a corridor on a real road, and the keyboard and alignment fixes.</p>
       <div class="links">
         <div><span>Operator console</span><a href="https://sutra-control.expo.app">sutra-control.expo.app</a></div>
         <div><span>Source</span><a href="https://github.com/imsky1812/sutraGrid">github.com/imsky1812/sutraGrid</a></div>
@@ -348,6 +348,7 @@ flowchart LR
         <li><time>18 Aug</time><div><b>Rewrite on Expo and Supabase</b><p>New schema with RLS, a new app (login, vehicles, background telemetry, routing), and a new dark/lime design with generated icon and splash. Google Maps replaced with key-free MapLibre, OSRM and Nominatim. Drive history, speeding violations, operator alerts, retention and a role-scoped console built. First EAS builds.</p></div></li>
         <li><time>19 Aug</time><div><b>Cleanup and device fixes</b><p>Removed the old Kotlin client and Node relay, rewrote the README, centred the map on the real location, added crash reporting on next launch.</p></div></li>
         <li><time>21 Sep</time><div><b>Stability</b><p>Fixed the app closing by itself (the missing notification permission killed the background service) and made position streaming work without background permission, so vehicles appear on the console.</p></div></li>
+        <li><time>15 Oct</time><div><b>Authorizing vehicles from the console</b><p>Emergency authorization is now granted in the console instead of the SQL editor: a Vehicles screen listing every registered vehicle, a checked function behind it, and an audit record of who granted what. APK rebuilt, since Expo artifacts expire after 14 days.</p></div></li>
         <li><time>22 Sep</time><div><b>Alerts, green corridor, layout</b><p>Beeping alerts and automatic overspeed warnings. The green corridor end to end. Internal database functions locked down. Keyboard and screen-edge alignment fixed across the app. This record added to the repository as <code>docs/project-record.html</code>, kept up to date with every change.</p></div></li>
       </ol>
     </section>
@@ -369,6 +370,7 @@ flowchart LR
         <li>A week of drive history and speeding insights: when, where and how fast.</li>
         <li>Send alerts to one vehicle or broadcast to all, with category and severity.</li>
         <li>Active green corridors with junction states and drivers warned.</li>
+        <li><b>Vehicles screen:</b> grant or revoke emergency authorization and set the vehicle type for any registered vehicle. Operators only; every change is recorded against the operator who made it.</li>
       </ul>
       <h3>Alerts</h3>
       <div class="table-wrap">
@@ -405,7 +407,7 @@ flowchart LR
     <section id="security">
       <h2>Security</h2>
       <ul>
-        <li>Emergency privilege is a database flag only an administrator can set; a trigger blocks drivers from granting it to themselves.</li>
+        <li>Emergency privilege is a database flag drivers cannot touch: a trigger refuses any change made by a signed-in client. Operators grant it through a checked function that records who granted it, when, and to which vehicle (<code>emergency_grants</code>).</li>
         <li>Every table has row-level security. Corridor tables have no client write policy at all; corridors open and close only through two checked functions.</li>
         <li>Internal database functions are closed to the public API (migration 10). Before that, anyone could trigger data pruning or the operator-invite sync.</li>
         <li>No map or routing API keys anywhere. The Supabase anon key in the app is public by design; RLS is the protection.</li>
@@ -426,6 +428,7 @@ flowchart LR
             <tr><td><code>alerts</code>, <code>alert_receipts</code></td><td>Operator and system alerts, and acknowledgements</td></tr>
             <tr><td><code>corridors</code> and 3 child tables</td><td>Route points, simulated junction states, drivers warned</td></tr>
             <tr><td><code>operators</code>, <code>operator_invites</code></td><td>Who may watch the whole fleet</td></tr>
+            <tr><td><code>emergency_grants</code></td><td>Who granted emergency authorization, to which vehicle, when</td></tr>
             <tr><td><code>settings</code>, <code>retention_policy</code></td><td>Speed limit (80 km/h); prune windows</td></tr>
           </tbody>
         </table>
@@ -439,7 +442,7 @@ flowchart LR
           <thead><tr><th>Suite</th><th>Count</th><th>Runs on</th></tr></thead>
           <tbody>
             <tr><td>App: screens, alerts, corridor, telemetry</td><td class="num">99 passing</td><td>Jest</td></tr>
-            <tr><td>Database rules and triggers, Edge Function handlers</td><td class="num">147 passing</td><td>PGlite (Postgres in WASM), no Docker</td></tr>
+            <tr><td>Database rules and triggers, Edge Function handlers</td><td class="num">159 passing</td><td>PGlite (Postgres in WASM), no Docker</td></tr>
           </tbody>
         </table>
       </div>
@@ -467,7 +470,8 @@ flowchart LR
         <li>“Fastest” route uses speed limits, not live traffic; live traffic needs the authority’s feed or a paid provider.</li>
         <li>Only drivers running SUTRA get corridor warnings.</li>
         <li>The public OSRM, Nominatim and Overpass servers have no uptime guarantee. The junction lookup is often refused or rate-limited, so it retries from the phone; a corridor still starts without junctions if both fail.</li>
-        <li>EAS build artifacts expire after 14 days.</li>
+        <li>EAS build artifacts expire after 14 days, so a download link older than that returns 404 and the app has to be rebuilt.</li>
+        <li>No CI: the 258 tests run only when someone runs them. The app suite can also time out when the machine is busy running the database suite at the same time.</li>
       </ul>
     </section>
 
@@ -476,11 +480,7 @@ flowchart LR
       <ul class="todo">
         <li>Install <code>sutra-vehicle-keyboard-fix.apk</code> and check: the beep on a new alert, text boxes above the keyboard, the layout clear of the status and navigation bars.</li>
         <li>Add <code>https://sutra-control.expo.app</code> to Supabase → Authentication → URL Configuration → Redirect URLs, so password-reset emails return to the console.</li>
-        <li>To try a corridor, authorize a vehicle in the Supabase SQL editor:
-<pre class="sql">update public.vehicles
-   set is_emergency_authorized = true, vehicle_type = 'AMBULANCE'
- where vehicle_number = 'UP 32 G 6789';</pre>
-          Seeing a driver get warned needs a second phone on the route.</li>
+        <li>To try a corridor, open <b>Vehicles</b> in the console, set the type to AMBULANCE and press <b>Authorize</b>, then start a shift in that vehicle. Seeing a driver get warned needs a second phone on the route.</li>
         <li>Optional: enable leaked-password protection in Supabase Auth (flagged by the security advisor).</li>
       </ul>
     </section>

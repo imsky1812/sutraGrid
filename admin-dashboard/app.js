@@ -99,6 +99,7 @@ async function enterConsole() {
   $('gate').hidden = true;
   $('console').hidden = false;
   $('events-label').textContent = state.isOperator ? 'Fleet events' : 'My events';
+  $('open-vehicles').hidden = !state.isOperator;
   await startConsole();
 }
 
@@ -1064,6 +1065,156 @@ setInterval(() => {
     if (new Date(item.corridor.expires_at).getTime() <= now) removeCorridor(id);
   });
 }, 30_000);
+
+// ---------------------------------------------------------------------------
+// Vehicles: emergency authorization
+//
+// The flag that lets a vehicle open a green corridor. A driver cannot set it on
+// their own vehicle - a database trigger refuses - so it is granted here, by a
+// named operator, and every change is recorded in emergency_grants.
+//
+// This lists the vehicles table rather than the live fleet, so a vehicle that
+// has never started a shift can still be authorized.
+// ---------------------------------------------------------------------------
+
+const VEHICLE_TYPES = ['NORMAL', 'AMBULANCE', 'POLICE', 'FIRE'];
+
+/** Keep a granted flag visible on the map and in the list straight away. */
+function applyAuthorizationLocally(vehicleId, patch) {
+  const entry = state.fleet.get(vehicleId);
+  if (!entry?.vehicle) return;
+  Object.assign(entry.vehicle, patch);
+  refreshMarker(entry);
+  renderFleet();
+  if (state.selectedId === vehicleId) renderDetail();
+}
+
+function vehicleAdminRow(vehicle, lastGrant, onChanged) {
+  const row = el('div', { className: 'admin-row' });
+
+  const authorized = !!vehicle.is_emergency_authorized;
+  const head = el('div', { className: 'admin-head' }, [
+    el('strong', { text: vehicle.vehicle_number }),
+    el('span', {
+      className: authorized ? 'tag granted' : 'tag',
+      text: authorized ? 'Emergency authorized' : vehicle.vehicle_type,
+    }),
+  ]);
+  row.appendChild(head);
+
+  row.appendChild(
+    el('small', {
+      className: 'muted',
+      text: lastGrant
+        ? `${vehicle.driver_name} · last changed ${new Date(lastGrant.at).toLocaleString([], {
+            day: 'numeric',
+            month: 'short',
+            hour: '2-digit',
+            minute: '2-digit',
+          })}`
+        : vehicle.driver_name,
+    }),
+  );
+
+  const type = el('select', { className: 'field-sm' });
+  VEHICLE_TYPES.forEach((value) => {
+    const option = el('option', { text: value });
+    option.value = value;
+    if (value === vehicle.vehicle_type) option.selected = true;
+    type.appendChild(option);
+  });
+
+  const action = el('button', {
+    className: authorized ? 'btn' : 'btn accent',
+    text: authorized ? 'Revoke' : 'Authorize',
+  });
+  const status = el('small', { className: 'error', text: '' });
+  status.hidden = true;
+
+  action.addEventListener('click', async () => {
+    action.disabled = true;
+    status.hidden = true;
+    const wanted = !authorized;
+    try {
+      const { error } = await supabase.rpc('set_emergency_authorization', {
+        p_vehicle_id: vehicle.id,
+        p_authorized: wanted,
+        p_vehicle_type: type.value,
+      });
+      if (error) throw error;
+
+      logEvent(
+        'alert',
+        wanted ? 'Emergency authorization granted' : 'Emergency authorization revoked',
+        `${vehicle.vehicle_number} · ${type.value}`,
+      );
+      applyAuthorizationLocally(vehicle.id, {
+        is_emergency_authorized: wanted,
+        vehicle_type: type.value,
+      });
+      onChanged();
+    } catch (e) {
+      status.textContent = e?.message ?? String(e);
+      status.hidden = false;
+      action.disabled = false;
+    }
+  });
+
+  row.appendChild(el('div', { className: 'admin-actions' }, [type, action]));
+  row.appendChild(status);
+  return row;
+}
+
+async function openVehicleAdmin() {
+  drawerShell('Vehicles');
+  drawer.appendChild(el('p', { className: 'muted', text: 'Loading…' }));
+
+  const [vehicleRes, grantRes] = await Promise.all([
+    supabase
+      .from('vehicles')
+      .select('id, vehicle_number, driver_name, vehicle_type, is_emergency_authorized')
+      .order('vehicle_number'),
+    supabase
+      .from('emergency_grants')
+      .select('vehicle_id, authorized, at')
+      .order('at', { ascending: false })
+      .limit(200),
+  ]);
+
+  drawerShell('Vehicles');
+
+  if (vehicleRes.error) {
+    drawer.appendChild(el('p', { className: 'error', text: vehicleRes.error.message }));
+    return;
+  }
+
+  const vehicles = vehicleRes.data ?? [];
+  // Newest first, so the first row seen for a vehicle is its latest change.
+  const latest = new Map();
+  (grantRes.data ?? []).forEach((g) => {
+    if (!latest.has(g.vehicle_id)) latest.set(g.vehicle_id, g);
+  });
+
+  drawer.appendChild(
+    el('p', {
+      className: 'muted',
+      text: 'Emergency authorization lets a vehicle open a green corridor. Drivers cannot grant it; every change here is recorded against your account.',
+    }),
+  );
+
+  if (vehicles.length === 0) {
+    drawer.appendChild(
+      el('p', { className: 'muted', text: 'No vehicles registered yet.' }),
+    );
+    return;
+  }
+
+  const list = el('div', { className: 'admin-list' });
+  vehicles.forEach((v) => list.appendChild(vehicleAdminRow(v, latest.get(v.id), openVehicleAdmin)));
+  drawer.appendChild(list);
+}
+
+$('open-vehicles').addEventListener('click', openVehicleAdmin);
 
 async function startConsole() {
   // The map is the most fragile part of the console: MapLibre needs WebGL, and

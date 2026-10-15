@@ -329,3 +329,21 @@ textarea.field-sm { resize: vertical; min-height: 76px; }
   border: 2px solid #0D0F0B; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
   background: #FF6B5A; transition: background 0.3s;
 }
+
+/* Vehicles: emergency authorization */
+.admin-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+.admin-row {
+  background: var(--surface-high); border: 1px solid var(--line); border-radius: 12px;
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 6px;
+}
+.admin-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.admin-head strong { font-size: 13.5px; }
+.admin-actions { display: flex; gap: 8px; align-items: center; }
+.admin-actions .field-sm { flex: 1; padding: 7px 10px; font-size: 12.5px; }
+.admin-actions .btn { white-space: nowrap; }
+.tag {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase;
+  color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px;
+  white-space: nowrap;
+}
+.tag.granted { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
