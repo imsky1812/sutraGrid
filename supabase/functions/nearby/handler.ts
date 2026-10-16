@@ -5,9 +5,15 @@
 // tapping the police chip was routed two thousand kilometres south. This finds
 // the real thing nearest to wherever the driver actually is.
 //
-// Overpass first, because "nearest amenity to this point" is a spatial query
-// and OpenStreetMap answers it exactly. Nominatim is the fallback: it is a text
-// search, so it can only be biased toward a box, never sorted by distance.
+// Photon first: it lists every amenity of a kind inside a box (a category
+// search, so a hospital need not have "hospital" in its name), and it answers
+// the Edge runtime. On 16 October every public Overpass server was refusing or
+// timing out - even from an ordinary network - and Nominatim refuses the Edge
+// runtime outright, so the Nearest buttons failed every time.
+//
+// Overpass is next, because "nearest amenity to this point" is exactly what it
+// answers when it is up. Nominatim is the last resort: a text search, so it
+// can only be biased toward a box, never sorted by distance.
 //
 // Like the other functions, this file has no Deno globals so it can be unit
 // tested under Node; index.ts is the wiring.
@@ -24,6 +30,8 @@ export type Place = {
 export type Deps = {
   /** Tried in order; the public servers are often busy. */
   overpassUrls: string[];
+  /** Photon-compatible geocoder, tried first. Without one, Overpass first. */
+  photonUrl?: string;
   geocoderUrl: string;
   userAgent: string;
   fetchImpl: typeof fetch;
@@ -34,6 +42,7 @@ export const DEFAULT_OVERPASS = [
   'https://overpass.kumi.systems/api/interpreter',
 ];
 export const DEFAULT_GEOCODER = 'https://nominatim.openstreetmap.org';
+export const DEFAULT_PHOTON = 'https://photon.komoot.io';
 export const DEFAULT_USER_AGENT = 'SUTRA-traffic/1.0 (emergency service finder)';
 
 /** Per server. A driver is waiting on this, so give up quickly. */
@@ -41,9 +50,9 @@ const TIMEOUT_MS = 12_000;
 
 /** What each chip means in OpenStreetMap, and what to call an unnamed one. */
 export const KINDS = {
-  hospital: { tag: 'amenity=hospital', label: 'Hospital' },
-  fire: { tag: 'amenity=fire_station', label: 'Fire station' },
-  police: { tag: 'amenity=police', label: 'Police station' },
+  hospital: { tag: 'amenity=hospital', category: 'osm.amenity.hospital', label: 'Hospital' },
+  fire: { tag: 'amenity=fire_station', category: 'osm.amenity.fire_station', label: 'Fire station' },
+  police: { tag: 'amenity=police', category: 'osm.amenity.police', label: 'Police station' },
 } as const;
 
 export type Kind = keyof typeof KINDS;
@@ -113,6 +122,77 @@ function toPlaces(elements: Element[], kind: Kind, near: LatLng): Place[] {
 
 export function nearest(places: Place[], max = MAX_RESULTS): Place[] {
   return [...places].sort((a, b) => a.distanceMeters - b.distanceMeters).slice(0, max);
+}
+
+/** A box `radius` metres each way from the driver, as Photon's minLon,minLat,maxLon,maxLat. */
+export function bboxAround(near: LatLng, radius: number): string {
+  const dLat = radius / 110540;
+  const dLng = radius / (111320 * Math.cos((near.latitude * Math.PI) / 180));
+  return [near.longitude - dLng, near.latitude - dLat, near.longitude + dLng, near.latitude + dLat]
+    .map((v) => v.toFixed(5))
+    .join(',');
+}
+
+/** Per box. Photon returns its own ranking, not distance, so ask for plenty and sort. */
+const PHOTON_LIMIT = 50;
+
+type PhotonFeature = {
+  geometry?: { coordinates?: [number, number] };
+  properties?: { name?: string };
+};
+
+/**
+ * Every mapped amenity of this kind in a box around the driver, widening the
+ * box until something turns up. Null when Photon could not be reached.
+ */
+async function findViaPhoton(kind: Kind, near: LatLng, deps: Deps): Promise<Place[] | null> {
+  if (!deps.photonUrl) return null;
+  const origin: Point = [near.latitude, near.longitude];
+  let reached = false;
+
+  for (const radius of RADII_M) {
+    const url = new URL(`${deps.photonUrl}/api/`);
+    url.searchParams.set('include', KINDS[kind].category);
+    url.searchParams.set('bbox', bboxAround(near, radius));
+    url.searchParams.set('lat', String(near.latitude));
+    url.searchParams.set('lon', String(near.longitude));
+    url.searchParams.set('limit', String(PHOTON_LIMIT));
+    url.searchParams.set('lang', 'en');
+
+    try {
+      const response = await deps.fetchImpl(url.toString(), {
+        headers: { 'User-Agent': deps.userAgent, Accept: 'application/json' },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        console.error('[nearby] photon status', response.status);
+        return reached ? [] : null;
+      }
+      const data = (await response.json()) as { features?: PhotonFeature[] };
+      reached = true;
+      const places = nearest(
+        (data.features ?? [])
+          .map((f) => {
+            // GeoJSON order: longitude first.
+            const lat = Number(f.geometry?.coordinates?.[1]);
+            const lng = Number(f.geometry?.coordinates?.[0]);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+            return {
+              name: f.properties?.name || KINDS[kind].label,
+              latitude: lat,
+              longitude: lng,
+              distanceMeters: distanceM(origin, [lat, lng]),
+            };
+          })
+          .filter((p): p is Place => p !== null),
+      );
+      if (places.length > 0) return places;
+    } catch (e) {
+      console.error('[nearby] photon failed:', (e as Error)?.message ?? e);
+      return reached ? [] : null;
+    }
+  }
+  return reached ? [] : null;
 }
 
 /**
@@ -238,6 +318,12 @@ export async function handler(req: Request, deps: Deps): Promise<Response> {
   const kind = body.kind as Kind;
   const near = body.near;
 
+  const viaPhoton = await findViaPhoton(kind, near, deps);
+  if (viaPhoton && viaPhoton.length > 0) {
+    return json({ places: viaPhoton, source: 'photon' }, 200);
+  }
+
+  // Photon empty or down: Overpass may know of one Photon has not indexed.
   const viaOverpass = await findViaOverpass(kind, near, deps);
   if (viaOverpass && viaOverpass.length > 0) {
     return json({ places: viaOverpass, source: 'overpass' }, 200);
@@ -248,9 +334,10 @@ export async function handler(req: Request, deps: Deps): Promise<Response> {
     return json({ places: viaGeocoder, source: 'nominatim' }, 200);
   }
 
-  // Overpass reached and genuinely empty, and the geocoder added nothing:
-  // there really is no such service mapped near this driver.
+  // Reached and genuinely empty, and the geocoder added nothing: there really
+  // is no such service mapped near this driver.
   if (viaOverpass) return json({ places: [], source: 'overpass' }, 200);
+  if (viaPhoton) return json({ places: [], source: 'photon' }, 200);
 
   return json({ error: `Could not look up the nearest ${KINDS[kind].label.toLowerCase()}.` }, 502);
 }

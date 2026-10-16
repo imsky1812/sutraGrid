@@ -7,7 +7,15 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { handler, distanceM, nearest, KINDS, RADII_M } from '../functions/nearby/handler.ts';
+import {
+  handler,
+  bboxAround,
+  distanceM,
+  nearest,
+  KINDS,
+  RADII_M,
+  DEFAULT_PHOTON,
+} from '../functions/nearby/handler.ts';
 
 const DELHI = { latitude: 28.6139, longitude: 77.209 };
 
@@ -200,4 +208,92 @@ test('caps the number of results', async () => {
 test('distance matches the database approximation', async () => {
   // One degree of latitude, as the planar formula defines it.
   assert.equal(Math.round(distanceM([0, 0], [1, 0])), 110540);
+});
+
+// --- Photon first ------------------------------------------------------------
+//
+// On 16 October every public Overpass server was refusing or timing out and
+// Nominatim refuses the Edge runtime, so the Nearest buttons failed every time.
+// Photon lists amenities by category inside a box, whatever they are called.
+
+const withPhoton = (fetchImpl) => ({ ...deps(fetchImpl), photonUrl: 'https://photon.example.com' });
+const isPhoton = (url) => url.startsWith('https://photon.');
+const feature = (lat, lon, name) => ({
+  type: 'Feature',
+  properties: name ? { name } : {},
+  geometry: { type: 'Point', coordinates: [lon, lat] },
+});
+const features = (list) => ok({ type: 'FeatureCollection', features: list });
+
+test('asks Photon by category inside a box, and returns the nearest first', async () => {
+  const calls = [];
+  const res = await handler(post({ kind: 'hospital', near: DELHI }), withPhoton((url) => {
+    calls.push(url);
+    return Promise.resolve(features([
+      feature(DELHI.latitude + 0.03, DELHI.longitude, 'Far Hospital'),
+      feature(DELHI.latitude + 0.005, DELHI.longitude, 'Dr Rupali Gupta'),
+    ]));
+  }));
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(body.source, 'photon');
+  assert.equal(calls.length, 1);
+  const params = new URL(calls[0]).searchParams;
+  assert.equal(params.get('include'), 'osm.amenity.hospital');
+  assert.ok(params.get('bbox'));
+  // A hospital need not be called one.
+  assert.equal(body.places[0].name, 'Dr Rupali Gupta');
+  assert.ok(body.places[0].distanceMeters < body.places[1].distanceMeters);
+});
+
+test('Photon widens the box until something turns up', async () => {
+  const boxes = [];
+  const res = await handler(post({ kind: 'fire', near: DELHI }), withPhoton((url) => {
+    boxes.push(new URL(url).searchParams.get('bbox'));
+    return Promise.resolve(
+      boxes.length < 2 ? features([]) : features([feature(DELHI.latitude + 0.1, DELHI.longitude, 'Fire Station')]),
+    );
+  }));
+  assert.equal(res.status, 200);
+  assert.equal(boxes.length, 2);
+  assert.notEqual(boxes[0], boxes[1]);
+  assert.equal((await res.json()).places[0].name, 'Fire Station');
+});
+
+test('falls back to Overpass when Photon is down', async () => {
+  const res = await handler(post({ kind: 'police', near: DELHI }), withPhoton((url) =>
+    isPhoton(url)
+      ? Promise.resolve(new Response('busy', { status: 503 }))
+      : Promise.resolve(ok({ elements: [node(1, DELHI.latitude + 0.01, DELHI.longitude, 'Thana')] })),
+  ));
+  const body = await res.json();
+  assert.equal(body.source, 'overpass');
+  assert.equal(body.places[0].name, 'Thana');
+});
+
+// The day it broke: Overpass dead everywhere, Nominatim 403.
+test('works with every Overpass server down and Nominatim refusing', async () => {
+  const res = await handler(post({ kind: 'hospital', near: DELHI }), withPhoton((url) =>
+    isPhoton(url)
+      ? Promise.resolve(features([feature(DELHI.latitude + 0.01, DELHI.longitude, 'Yashoda Hospital')]))
+      : Promise.resolve(new Response('no', { status: isOverpass(url) ? 504 : 403 })),
+  ));
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).places[0].name, 'Yashoda Hospital');
+});
+
+test('an unnamed Photon result is still somewhere to drive to', async () => {
+  const res = await handler(post({ kind: 'police', near: DELHI }), withPhoton(() =>
+    Promise.resolve(features([feature(DELHI.latitude + 0.01, DELHI.longitude)])),
+  ));
+  assert.equal((await res.json()).places[0].name, 'Police station');
+});
+
+test('the box is centred on the driver and grows with the radius', () => {
+  const [w, s, e, n] = bboxAround(DELHI, 5000).split(',').map(Number);
+  assert.ok(w < DELHI.longitude && e > DELHI.longitude && s < DELHI.latitude && n > DELHI.latitude);
+  assert.ok(Math.abs((n - s) * 110540 - 10000) < 5);
+  const wide = bboxAround(DELHI, 15000).split(',').map(Number);
+  assert.ok(wide[3] - wide[1] > n - s);
+  assert.match(DEFAULT_PHOTON, /^https:\/\//);
 });

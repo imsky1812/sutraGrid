@@ -942,6 +942,25 @@
   </p>
 </div>
 
+<div class="phase">
+  <div class="phase-head">
+    <span class="phase-no">16 OCT</span>
+    <h3>The Nearest buttons failed too</h3>
+    <span class="tag bug">Bug</span>
+    <span class="tag done">Fixed</span>
+  </div>
+  <p>
+    Reported straight after: Nearest hospital showed the same error. Every
+    public Overpass server was timing out or answering 500/504 — from an
+    ordinary network as well — so the function's lookup and the phone's own
+    retry both failed. <code>nearby</code> now asks Photon first for every
+    amenity of that kind inside a box around the driver (a category search,
+    not a name search), widening 5, 15 then 40 km and sorting by distance;
+    Overpass and Nominatim stay behind it. Corridor junctions still depend on
+    Overpass and fall back to a corridor without junctions. 6 tests.
+  </p>
+</div>
+
 <h2>What is deliberately not here</h2>
 <p>
   The source document is clear about the limits of the approach, and they belong

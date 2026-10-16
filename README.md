@@ -322,7 +322,7 @@ npm run apk              # gradlew assembleDebug with ninja parallelism capped
 
 ```bash
 cd mobile         && npm test && npm run typecheck   # 214 tests
-cd supabase/tests && npm install && npm test         # 403 tests
+cd supabase/tests && npm install && npm test         # 409 tests
 ```
 
 Schema and RLS tests run against **PGlite** — Postgres compiled to WASM, in
@@ -576,7 +576,10 @@ Things that cost real time here and are worth knowing:
   not just the corridor's junctions. On 16 October Nominatim went further and
   refused every request from the Edge runtime with 403, breaking place search,
   so `geocode` now asks Photon (photon.komoot.io, also OpenStreetMap, no key)
-  first and keeps Nominatim as the fallback.
+  first and keeps Nominatim as the fallback. The same day every public
+  Overpass server was down at once, so `nearby` (the Nearest hospital, fire
+  and police buttons) also asks Photon first, by category
+  (`include=osm.amenity.hospital`) inside a box, and sorts by distance.
 - **Android fixes a notification channel's sound on first creation.** Changing
   the beep means a new channel id (`sutra-alerts-v1` → `-v2`).
 - **Functions in `public` are REST endpoints.** Postgres grants EXECUTE to

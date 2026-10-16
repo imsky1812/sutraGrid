@@ -13,10 +13,17 @@ declare const Deno: {
   serve(handler: (req: Request) => Promise<Response>): void;
 };
 
-import { handler, DEFAULT_GEOCODER, DEFAULT_OVERPASS, DEFAULT_USER_AGENT } from './handler.ts';
+import {
+  handler,
+  DEFAULT_GEOCODER,
+  DEFAULT_OVERPASS,
+  DEFAULT_PHOTON,
+  DEFAULT_USER_AGENT,
+} from './handler.ts';
 
 Deno.serve((req: Request) =>
   handler(req, {
+    photonUrl: Deno.env.get('PHOTON_URL') ?? DEFAULT_PHOTON,
     overpassUrls: Deno.env.get('OVERPASS_URLS')?.split(',').map((u) => u.trim()) ?? DEFAULT_OVERPASS,
     geocoderUrl: Deno.env.get('GEOCODER_URL') ?? DEFAULT_GEOCODER,
     userAgent: Deno.env.get('OVERPASS_USER_AGENT') ?? DEFAULT_USER_AGENT,
