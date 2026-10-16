@@ -158,3 +158,27 @@ test('a driver cannot acknowledge for a vehicle they do not own', async () => {
     );
   });
 });
+
+// The console shows an operator which vehicles an alert has reached; a driver
+// must still see only their own vehicle's receipts.
+test('an operator sees every receipt, a driver only their own', async () => {
+  const db = await setup();
+  await asUser(db, OPERATOR, async () => {
+    await send(db, null, 'Fleet-wide: road closed at Silk Board');
+    await db.exec('commit; begin');
+  });
+  const { rows } = await db.query('select id from public.alerts limit 1');
+  await db.query(
+    'insert into public.alert_receipts (alert_id, vehicle_id) values ($1,$2), ($1,$3)',
+    [rows[0].id, VEH_A, VEH_B],
+  );
+
+  await asUser(db, OPERATOR, async () => {
+    const seen = await db.query('select vehicle_id from public.alert_receipts order by vehicle_id');
+    assert.deepEqual(seen.rows.map((r) => r.vehicle_id), [VEH_A, VEH_B]);
+  });
+  await asUser(db, DRIVER, async () => {
+    const seen = await db.query('select vehicle_id from public.alert_receipts');
+    assert.deepEqual(seen.rows.map((r) => r.vehicle_id), [VEH_A]);
+  });
+});

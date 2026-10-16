@@ -65,6 +65,14 @@ by row-level security rather than by hiding things in the browser, so an
 operator's list contains every vehicle because the database returns every
 vehicle.
 
+An operator sees each alert land. The app writes an `alert_receipts` row the
+moment an alert reaches it open, and the console shows those live against each
+alert and on the vehicle's card, and warns before sending to an offline
+vehicle. A missing receipt reads "not yet seen in the app", never "failed": an
+alert pushed to a closed app leaves no receipt. The console's small pure
+helpers (dated "last seen", label collision, delivery wording) live in
+`admin-dashboard/console-math.js` and are tested with the database suite.
+
 ---
 
 ## Security model
@@ -196,7 +204,7 @@ the phone and a corridor starts without junctions if both fail.
 | `vehicle_positions` | Live position, one upserted row per vehicle |
 | `position_history` | Append-only track, written by trigger |
 | `violations` | Speeding episodes with where, when and peak speed |
-| `alerts`, `alert_receipts` | Operator and system alerts, and acknowledgements |
+| `alerts`, `alert_receipts` | Operator and system alerts, and when each reached an open app (live in the console) |
 | `corridors`, `corridor_route_points`, `corridor_signals`, `corridor_warnings` | Green corridors: route, simulated junction states, drivers warned |
 | `operators`, `operator_invites` | Who may watch the whole fleet |
 | `device_tokens` | Which phone is in which vehicle, for push |
@@ -313,8 +321,8 @@ npm run apk              # gradlew assembleDebug with ninja parallelism capped
 ## Testing
 
 ```bash
-cd mobile         && npm test && npm run typecheck   # 201 tests
-cd supabase/tests && npm install && npm test         # 382 tests
+cd mobile         && npm test && npm run typecheck   # 214 tests
+cd supabase/tests && npm install && npm test         # 393 tests
 ```
 
 Schema and RLS tests run against **PGlite** — Postgres compiled to WASM, in

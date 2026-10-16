@@ -13,6 +13,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.112.3';
 import maplibregl from 'https://esm.sh/maplibre-gl@5.6.1';
 import { formatDuration, positionAt } from './replay-math.js';
+import { deliveryStatus, formatSeen, labelsToHide } from './console-math.js';
 
 const CONFIG = window.SUTRA_CONFIG || {};
 const MAP_STYLE = 'https://tiles.openfreemap.org/styles/dark';
@@ -40,6 +41,16 @@ const state = {
   map: null,
   historyLayerIds: [],
   hasFramedFleet: false,
+  // Set after the first full read, so vehicles already offline at load are
+  // not announced as coming online.
+  liveReady: false,
+  // The detail card is built once per vehicle and then updated in place.
+  detailFor: null,
+  detail: null,
+  // Alerts and who has received them: id -> { alert, receipts: Map(vehicle -> at) }.
+  sent: new Map(),
+  // Alerts sent from this console, whose receipts are worth a log line.
+  mine: new Set(),
 };
 
 const $ = (id) => document.getElementById(id);
@@ -51,6 +62,7 @@ function el(tag, props = {}, children = []) {
   if (props.type) node.type = props.type;
   if (props.placeholder) node.placeholder = props.placeholder;
   if (props.href) node.href = props.href;
+  if (props.title) node.title = props.title;
   if (props.style) Object.assign(node.style, props.style);
   for (const child of children) if (child) node.appendChild(child);
   return node;
@@ -64,6 +76,9 @@ const num = (v, f = 0) => (typeof v === 'number' && Number.isFinite(v) ? v : f);
 const plate = (entry) => entry.vehicle?.vehicle_number ?? '—';
 const glyph = (entry) => TYPE_GLYPH[entry.vehicle?.vehicle_type] ?? TYPE_GLYPH.NORMAL;
 const isStale = (entry) => Date.now() - new Date(entry.position.updated_at).getTime() > STALE_AFTER_MS;
+const liveCount = () => [...state.fleet.values()].filter((e) => !isStale(e)).length;
+/** Replay and zone drawing own the bottom of the map; the card stays out of their way. */
+const mapBusy = () => !!(state.replay || state.draft || state.replayLoading);
 
 // ---------------------------------------------------------------------------
 // Auth
@@ -96,6 +111,7 @@ async function enterConsole() {
   consoleStarted = true;
 
   state.isOperator = await checkOperator();
+  state.uid = (await supabase.auth.getUser()).data.user?.id ?? null;
 
   const { data: limitRow } = await supabase
     .from('settings').select('value').eq('key', 'speed_limit_kmh').maybeSingle();
@@ -267,6 +283,8 @@ function initMap() {
     zoom: 11,
   });
   state.map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+  // Labels that cleared each other at one zoom collide at another.
+  state.map.on('move', scheduleLabelLayout);
 }
 
 function markerElement(entry) {
@@ -275,6 +293,39 @@ function markerElement(entry) {
   wrap.appendChild(el('span', { className: 'marker-badge', text: plate(entry) }));
   wrap.addEventListener('click', () => selectVehicle(entry.position.vehicle_id));
   return wrap;
+}
+
+/** Which label wins when two would overlap: the selected vehicle, then
+ *  emergencies, then speeding, then anything live, and offline ones last. */
+function labelPriority(entry) {
+  if (state.selectedId === entry.position.vehicle_id) return 100;
+  if (isStale(entry)) return 0;
+  if (entry.vehicle?.is_emergency_authorized) return 50;
+  if (num(entry.position.speed) > state.speedLimit) return 30;
+  return 10;
+}
+
+let labelFrame = 0;
+
+/** Hide the labels that would sit on top of a more important one. Batched to
+ *  one pass per animation frame, however many positions arrive. */
+function scheduleLabelLayout() {
+  if (labelFrame || !state.map) return;
+  labelFrame = requestAnimationFrame(() => {
+    labelFrame = 0;
+    const labels = [];
+    state.fleet.forEach((entry, id) => {
+      const badge = entry.marker?.getElement().querySelector('.marker-badge');
+      if (!badge) return;
+      const r = badge.getBoundingClientRect();
+      if (!r.width) return;
+      labels.push({ id, priority: labelPriority(entry), left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+    });
+    const hidden = labelsToHide(labels);
+    state.fleet.forEach((entry, id) => {
+      entry.marker?.getElement().classList.toggle('label-hidden', hidden.has(id));
+    });
+  });
 }
 
 function refreshMarker(entry) {
@@ -301,13 +352,15 @@ function refreshMarker(entry) {
 
   const avatar = root.querySelector('.marker-avatar');
   if (avatar.textContent !== glyph(entry)) avatar.textContent = glyph(entry);
+  scheduleLabelLayout();
 }
 
 function selectVehicle(vehicleId) {
   state.selectedId = vehicleId;
   const entry = state.fleet.get(vehicleId);
   if (entry && state.map) {
-    state.map.easeTo({ center: [entry.position.lng, entry.position.lat], zoom: 15, duration: 600 });
+    // Offset upwards so the vehicle sits above the detail card, not under it.
+    state.map.easeTo({ center: [entry.position.lng, entry.position.lat], zoom: 15, duration: 600, offset: [0, -140] });
   }
   state.fleet.forEach(refreshMarker);
   renderFleet();
@@ -349,7 +402,8 @@ function drawTrack(points) {
   });
   state.map.fitBounds(
     coords.reduce((b, c) => b.extend(c), new maplibregl.LngLatBounds(coords[0], coords[0])),
-    { padding: 100, maxZoom: 16, duration: 700 },
+    // Extra room at the bottom for the replay bar.
+    { padding: { top: 90, bottom: 150, left: 80, right: 80 }, maxZoom: 16, duration: 700 },
   );
 }
 
@@ -419,7 +473,7 @@ function renderFleet() {
     const meta = el('div', { className: 'row-meta' }, [
       el('span', {
         className: stale ? 'stale' : over ? 'over' : 'live',
-        text: stale ? 'Offline' : `${speed.toFixed(0)} km/h`,
+        text: stale ? `Offline · ${formatSeen(entry.position.updated_at)}` : `${speed.toFixed(0)} km/h`,
       }),
       el('span', { text: '·' }),
       el('span', { text: entry.vehicle?.driver_name ?? 'Unknown driver' }),
@@ -457,87 +511,156 @@ wireChips('sort-chips', 'sort', renderFleet);
 // Detail card
 // ---------------------------------------------------------------------------
 
-function stat(label, value, over) {
-  return el('div', { className: 'stat' }, [
-    el('b', { text: value, className: over ? 'over' : '' }),
-    el('small', { text: label }),
+const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+
+/** Set text only when it changed, so an unchanged card is not touched at all. */
+function setText(node, text) {
+  if (node.textContent !== text) node.textContent = text;
+}
+
+function closeDetail() {
+  state.selectedId = null;
+  state.fleet.forEach(refreshMarker);
+  renderFleet();
+  renderDetail();
+}
+
+/**
+ * The card's structure for one vehicle. It used to be torn down and rebuilt
+ * on every position and every five seconds, which made it flicker and dropped
+ * a hovered or focused button; now only fillDetail runs on updates.
+ */
+function buildDetail(entry) {
+  const card = $('detail');
+  clear(card);
+  const id = entry.position.vehicle_id;
+
+  const avatar = el('div', { className: 'avatar' });
+  const title = el('div', { className: 'detail-title' });
+  const sub = el('div', { className: 'detail-sub' });
+  const status = el('span', { className: 'status-pill' });
+  const close = el('button', { className: 'icon-btn', text: '✕', title: 'Close' });
+  close.type = 'button';
+  close.addEventListener('click', closeDetail);
+
+  const speed = el('b');
+  const speedLabel = el('small');
+  const heading = el('b');
+  const seen = el('b');
+
+  const coords = el('div', { className: 'detail-coords' });
+  const alertBox = el('div', { className: 'detail-alert' });
+  const deliveryMsg = el('span', { className: 'delivery-msg' });
+  const deliveryState = el('span', { className: 'delivery-state' });
+  const delivery = el('div', { className: 'delivery' }, [
+    el('small', { className: 'delivery-label', text: 'Last alert' }),
+    deliveryMsg,
+    deliveryState,
   ]);
+
+  const actions = el('div', { className: 'detail-actions' });
+  const trackBtn = el('button', { className: 'btn', text: 'Trips & history' });
+  trackBtn.addEventListener('click', () => openInsights(id));
+  actions.appendChild(trackBtn);
+  // The one role-conditional control in the interface.
+  if (state.isOperator) {
+    const alertBtn = el('button', { className: 'btn accent', text: 'Send alert' });
+    alertBtn.addEventListener('click', () => openComposer(id));
+    actions.appendChild(alertBtn);
+  }
+
+  card.appendChild(
+    el('div', { className: 'detail-head' }, [
+      avatar,
+      el('div', { className: 'detail-name' }, [title, sub]),
+      status,
+      close,
+    ]),
+  );
+  card.appendChild(
+    el('div', { className: 'stat-row' }, [
+      el('div', { className: 'stat' }, [speed, speedLabel]),
+      el('div', { className: 'stat' }, [heading, el('small', { text: 'heading' })]),
+      el('div', { className: 'stat' }, [seen, el('small', { text: 'last seen' })]),
+    ]),
+  );
+  card.appendChild(coords);
+  card.appendChild(alertBox);
+  card.appendChild(delivery);
+  card.appendChild(actions);
+
+  state.detail = { avatar, title, sub, status, speed, speedLabel, heading, seen, coords, alertBox, delivery, deliveryMsg, deliveryState };
+  state.detailFor = id;
+  // Restart the entrance animation for a newly chosen vehicle.
+  card.classList.remove('enter');
+  void card.offsetWidth;
+  card.classList.add('enter');
+}
+
+/** The most recent alert still in force that was meant for this vehicle. */
+function lastAlertFor(vehicleId) {
+  const now = Date.now();
+  let best = null;
+  state.sent.forEach((rec) => {
+    const a = rec.alert;
+    if (!a || (a.vehicle_id && a.vehicle_id !== vehicleId)) return;
+    if (a.expires_at && new Date(a.expires_at).getTime() < now) return;
+    if (!best || a.id > best.alert.id) best = rec;
+  });
+  return best;
+}
+
+function fillDetail(entry) {
+  const d = state.detail;
+  const id = entry.position.vehicle_id;
+  const speed = num(entry.position.speed);
+  const stale = isStale(entry);
+
+  d.avatar.className = 'avatar' + (entry.vehicle?.is_emergency_authorized ? ' emergency' : '');
+  setText(d.avatar, glyph(entry));
+  setText(d.title, plate(entry));
+  setText(d.sub, `${entry.vehicle?.driver_name ?? 'Unknown'} · ${entry.vehicle?.vehicle_type ?? 'NORMAL'}`);
+  setText(d.status, stale ? 'Offline' : 'Live');
+  d.status.className = `status-pill ${stale ? 'off' : 'on'}`;
+
+  // An offline vehicle is not doing its last reported speed. Showing that
+  // figure as current made a phone that died at 60 km/h look like it was
+  // still driving.
+  setText(d.speed, stale ? '—' : speed.toFixed(0));
+  d.speed.className = !stale && speed > state.speedLimit ? 'over' : '';
+  setText(d.speedLabel, stale ? `last ${speed.toFixed(0)} km/h` : 'km/h');
+
+  const h = num(entry.position.heading, -1);
+  setText(d.heading, stale || speed < 2 || h < 0 ? '—' : `${COMPASS[Math.round(h / 45) % 8]} ${Math.round(h)}°`);
+  setText(d.seen, formatSeen(entry.position.updated_at));
+  setText(d.coords, `${entry.position.lat.toFixed(5)}, ${entry.position.lng.toFixed(5)}`);
+
+  const alertText = entry.position.alert_message ?? '';
+  setText(d.alertBox, alertText);
+  d.alertBox.hidden = !alertText;
+
+  const last = lastAlertFor(id);
+  d.delivery.hidden = !last;
+  if (last) {
+    // Asked about this vehicle, so a broadcast reads the same as a direct one.
+    const st = deliveryStatus({ vehicle_id: id }, last.receipts, { targetOffline: stale });
+    setText(d.deliveryMsg, `“${last.alert.message}”`);
+    setText(d.deliveryState, st.text);
+    d.delivery.className = `delivery ${st.tone}`;
+  }
 }
 
 function renderDetail() {
   const card = $('detail');
   const entry = state.selectedId ? state.fleet.get(state.selectedId) : null;
-
-  if (!entry) {
+  if (!entry || mapBusy()) {
     card.hidden = true;
+    state.detailFor = null;
     return;
   }
-
-  clear(card);
+  if (state.detailFor !== state.selectedId) buildDetail(entry);
   card.hidden = false;
-
-  const speed = num(entry.position.speed);
-  const stale = isStale(entry);
-  const seen = new Date(entry.position.updated_at);
-
-  card.appendChild(
-    el('div', { className: 'detail-head' }, [
-      el('div', {
-        className: 'avatar' + (entry.vehicle?.is_emergency_authorized ? ' emergency' : ''),
-        text: glyph(entry),
-      }),
-      el('div', {}, [
-        el('div', { className: 'detail-title', text: plate(entry) }),
-        el('div', {
-          className: 'detail-sub',
-          text: `${entry.vehicle?.driver_name ?? 'Unknown'} · ${entry.vehicle?.vehicle_type ?? 'NORMAL'}`,
-        }),
-      ]),
-    ]),
-  );
-
-  card.appendChild(
-    el('div', { className: 'stat-row' }, [
-      stat('Speed', `${speed.toFixed(0)}`, speed > state.speedLimit),
-      stat('Status', stale ? 'Offline' : 'Live'),
-      stat('Last seen', seen.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })),
-    ]),
-  );
-
-  card.appendChild(
-    el('div', {
-      className: 'detail-sub',
-      text: `${entry.position.lat.toFixed(5)}, ${entry.position.lng.toFixed(5)}`,
-    }),
-  );
-
-  if (entry.position.alert_message) {
-    card.appendChild(el('div', { className: 'detail-alert', text: entry.position.alert_message }));
-  }
-
-  const actions = el('div', { className: 'detail-actions' });
-
-  const trackBtn = el('button', { className: 'btn', text: 'Track' });
-  trackBtn.addEventListener('click', () => openInsights(entry.position.vehicle_id));
-  actions.appendChild(trackBtn);
-
-  // The one role-conditional control in the interface.
-  if (state.isOperator) {
-    const alertBtn = el('button', { className: 'btn accent', text: 'Send alert' });
-    alertBtn.addEventListener('click', () => openComposer(entry.position.vehicle_id));
-    actions.appendChild(alertBtn);
-  }
-
-  const closeBtn = el('button', { className: 'btn', text: 'Close' });
-  closeBtn.addEventListener('click', () => {
-    state.selectedId = null;
-    state.fleet.forEach(refreshMarker);
-    renderFleet();
-    renderDetail();
-  });
-  actions.appendChild(closeBtn);
-
-  card.appendChild(actions);
+  fillDetail(entry);
 }
 
 // ---------------------------------------------------------------------------
@@ -548,12 +671,17 @@ const drawer = $('drawer');
 
 function closeDrawer() {
   drawer.hidden = true;
+  state.drawerRefresh = null;
   clear(drawer);
 }
 
 function drawerShell(title) {
   clear(drawer);
+  state.drawerRefresh = null;
   drawer.hidden = false;
+  drawer.classList.remove('enter');
+  void drawer.offsetWidth;
+  drawer.classList.add('enter');
   const close = el('button', { className: 'icon-btn', text: '\u2715' });
   close.addEventListener('click', closeDrawer);
   drawer.appendChild(el('div', { className: 'drawer-head' }, [el('h2', { text: title }), close]));
@@ -716,7 +844,9 @@ async function openComposer(vehicleId) {
   const target = el('select', { className: 'field-sm' });
   target.appendChild(el('option', { text: 'Whole fleet (broadcast)' })).value = '';
   state.fleet.forEach((e, id) => {
-    const option = el('option', { text: `${plate(e)} · ${e.vehicle?.driver_name ?? ''}` });
+    const option = el('option', {
+      text: `${plate(e)} · ${e.vehicle?.driver_name ?? ''}${isStale(e) ? ' · offline' : ''}`,
+    });
     option.value = id;
     if (id === vehicleId) option.selected = true;
     target.appendChild(option);
@@ -749,8 +879,62 @@ async function openComposer(vehicleId) {
   });
   message.maxLength = 300;
 
+  // Who will actually see it, said before sending rather than discovered after.
+  const reach = el('p', { className: 'reach' });
+  const updateReach = () => {
+    const chosen = target.value ? state.fleet.get(target.value) : null;
+    if (chosen) {
+      const off = isStale(chosen);
+      reach.className = `reach ${off ? 'warn' : 'ok'}`;
+      reach.textContent = off
+        ? `${plate(chosen)} is offline (last seen ${formatSeen(chosen.position.updated_at)}). It gets this by push if notifications are on, or in the app when it next opens, while the alert is in force (2 hours).`
+        : `${plate(chosen)} is live and will see this within seconds.`;
+    } else {
+      const live = liveCount();
+      reach.className = `reach ${live ? 'ok' : 'warn'}`;
+      reach.textContent = state.fleet.size
+        ? `${live} of ${state.fleet.size} vehicles are live. Offline ones get it by push, or when their app next opens.`
+        : 'No vehicles have reported yet. A broadcast reaches each one when its app next opens.';
+    }
+  };
+  target.addEventListener('change', updateReach);
+  updateReach();
+
   const status = el('p', { className: 'muted', text: '' });
   const send = el('button', { className: 'btn accent', text: 'Send alert' });
+
+  // What this console has sent, and whether it has landed. Receipts arrive
+  // live, so the list updates while the drawer is open.
+  const sentList = el('div', { className: 'sent-list' });
+  const renderSent = () => {
+    updateReach();
+    clear(sentList);
+    const recent = [...state.sent.values()]
+      .filter((r) => r.alert && r.alert.created_by)
+      .sort((a, b) => b.alert.id - a.alert.id)
+      .slice(0, 6);
+    if (recent.length === 0) {
+      sentList.appendChild(el('p', { className: 'muted', text: 'Nothing sent in the last two hours.' }));
+      return;
+    }
+    recent.forEach(({ alert, receipts }) => {
+      const to = alert.vehicle_id ? state.fleet.get(alert.vehicle_id) : null;
+      const st = deliveryStatus(alert, receipts, {
+        liveCount: liveCount(),
+        targetOffline: to ? isStale(to) : false,
+      });
+      sentList.appendChild(
+        el('div', { className: `sent-item ${st.tone}` }, [
+          el('div', { className: 'sent-top' }, [
+            el('strong', { text: alert.vehicle_id ? (to ? plate(to) : 'Vehicle') : 'Whole fleet' }),
+            el('time', { text: formatSeen(alert.created_at) }),
+          ]),
+          el('span', { className: 'sent-msg', text: alert.message }),
+          el('span', { className: 'delivery-state', text: st.text }),
+        ]),
+      );
+    });
+  };
 
   send.addEventListener('click', async () => {
     const text = message.value.trim();
@@ -763,13 +947,17 @@ async function openComposer(vehicleId) {
     send.textContent = 'Sending…';
 
     const { data: userData } = await supabase.auth.getUser();
-    const { error } = await supabase.from('alerts').insert({
-      created_by: userData.user.id,
-      vehicle_id: target.value || null,
-      category: category.value,
-      severity: severity.value,
-      message: text,
-    });
+    const { data: created, error } = await supabase
+      .from('alerts')
+      .insert({
+        created_by: userData.user.id,
+        vehicle_id: target.value || null,
+        category: category.value,
+        severity: severity.value,
+        message: text,
+      })
+      .select('id, created_by, vehicle_id, category, severity, message, created_at, expires_at')
+      .single();
 
     send.disabled = false;
     send.textContent = 'Send alert';
@@ -780,20 +968,31 @@ async function openComposer(vehicleId) {
     }
 
     message.value = '';
-    status.textContent = 'Sent.';
-    logEvent('alert', 'Alert sent', target.value ? `to ${plate(state.fleet.get(target.value))}` : 'to the whole fleet');
+    status.textContent = '';
+    // The Realtime insert logs it; this only records that it came from here,
+    // so its receipts are worth a log line too.
+    trackAlert(created);
+    state.mine.add(created.id);
+    refreshDelivery();
   });
 
-  drawer.appendChild(el('small', { className: 'muted', text: 'RECIPIENT' }));
+  drawer.appendChild(el('label', { className: 'label', text: 'Recipient' }));
   drawer.appendChild(target);
-  drawer.appendChild(el('small', { className: 'muted', text: 'CATEGORY' }));
-  drawer.appendChild(category);
-  drawer.appendChild(el('small', { className: 'muted', text: 'SEVERITY' }));
-  drawer.appendChild(severity);
-  drawer.appendChild(el('small', { className: 'muted', text: 'MESSAGE' }));
+  drawer.appendChild(reach);
+  drawer.appendChild(
+    el('div', { className: 'field-pair' }, [
+      el('div', {}, [el('label', { className: 'label', text: 'Category' }), category]),
+      el('div', {}, [el('label', { className: 'label', text: 'Severity' }), severity]),
+    ]),
+  );
+  drawer.appendChild(el('label', { className: 'label', text: 'Message' }));
   drawer.appendChild(message);
   drawer.appendChild(send);
   drawer.appendChild(status);
+  drawer.appendChild(el('label', { className: 'label', text: 'Sent · delivery' }));
+  drawer.appendChild(sentList);
+  renderSent();
+  state.drawerRefresh = renderSent;
 }
 
 // The Insights button opens whatever is useful for the current role and
@@ -862,7 +1061,102 @@ async function ensureVehicle(entry, vehicleId) {
   entry.vehicle = data;
   refreshMarker(entry);
   renderFleet();
-  logEvent('info', 'Vehicle online', `${data.vehicle_number} · ${data.driver_name}`);
+  if (state.selectedId === vehicleId) renderDetail();
+  if (entry.announce !== undefined) {
+    announceLiveness(entry, entry.announce);
+    entry.announce = undefined;
+  }
+}
+
+/**
+ * Log a vehicle going quiet or coming back. Only real changes count: on load
+ * every vehicle used to be announced as "online", including ones that had not
+ * reported for days.
+ */
+function noteLiveness(entry) {
+  const online = !isStale(entry);
+  const before = entry.online;
+  entry.online = online;
+  if (!state.liveReady || before === online) return;
+  // First sighting after load: worth saying only if it is live.
+  if (before === undefined && !online) return;
+  // The plate is not known yet; ensureVehicle says it once it is.
+  if (!entry.vehicle) {
+    entry.announce = online;
+    return;
+  }
+  announceLiveness(entry, online);
+}
+
+function announceLiveness(entry, online) {
+  logEvent(
+    online ? 'online' : 'idle',
+    online ? 'Vehicle online' : 'Vehicle offline',
+    `${plate(entry)} · ${entry.vehicle?.driver_name ?? 'Unknown driver'}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Alert delivery
+//
+// The app writes an alert_receipts row the moment an alert reaches it while
+// open. Receipts stream in live (migration 24), so an operator sees an alert
+// land instead of hoping it did.
+// ---------------------------------------------------------------------------
+
+function trackAlert(alert) {
+  let rec = state.sent.get(alert.id);
+  if (!rec) {
+    rec = { alert, receipts: new Map() };
+    state.sent.set(alert.id, rec);
+  } else {
+    rec.alert = alert;
+  }
+  return rec;
+}
+
+function refreshDelivery() {
+  state.drawerRefresh?.();
+  if (state.selectedId) renderDetail();
+}
+
+function onReceipt(receipt) {
+  let rec = state.sent.get(receipt.alert_id);
+  if (!rec) {
+    // The receipt beat the alert itself here; keep it for when it arrives.
+    rec = { alert: null, receipts: new Map() };
+    state.sent.set(receipt.alert_id, rec);
+  }
+  rec.receipts.set(receipt.vehicle_id, receipt.acknowledged_at);
+  if (state.mine.has(receipt.alert_id)) {
+    const entry = state.fleet.get(receipt.vehicle_id);
+    logEvent(
+      'delivered',
+      'Alert received',
+      `${entry ? plate(entry) : 'Vehicle'} — “${rec.alert?.message ?? ''}”`,
+    );
+  }
+  refreshDelivery();
+}
+
+/** Alerts from the last two hours with their receipts, so a console opened
+ *  after sending still shows what landed. */
+async function loadRecentAlerts() {
+  const since = new Date(Date.now() - 2 * 3_600_000).toISOString();
+  const { data, error } = await supabase
+    .from('alerts')
+    .select('id, created_by, vehicle_id, category, severity, message, created_at, expires_at')
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(50);
+  if (error || !data?.length) return;
+  data.forEach(trackAlert);
+  const { data: receipts } = await supabase
+    .from('alert_receipts')
+    .select('alert_id, vehicle_id, acknowledged_at')
+    .in('alert_id', data.map((a) => a.id));
+  (receipts ?? []).forEach((r) => state.sent.get(r.alert_id)?.receipts.set(r.vehicle_id, r.acknowledged_at));
+  refreshDelivery();
 }
 
 function applyPosition(position) {
@@ -872,6 +1166,7 @@ function applyPosition(position) {
   const entry = state.fleet.get(position.vehicle_id) ?? { vehicle: null, marker: null };
   entry.position = position;
   state.fleet.set(position.vehicle_id, entry);
+  noteLiveness(entry);
 
   const isFirst = state.fleet.size === 1 && !state.hasFramedFleet;
   ensureVehicle(entry, position.vehicle_id);
@@ -883,7 +1178,7 @@ function applyPosition(position) {
   }
 
   if (state.selectedId === position.vehicle_id) {
-    state.map?.easeTo({ center: [position.lng, position.lat], duration: 400 });
+    state.map?.easeTo({ center: [position.lng, position.lat], duration: 400, offset: [0, -140] });
     renderDetail();
   }
 
@@ -1357,15 +1652,32 @@ async function fetchTripPoints(vehicleId, from, to) {
 
 function stopReplay() {
   const r = state.replay;
-  if (!r) return;
-  cancelAnimationFrame(r.frame);
-  r.marker?.remove();
-  r.pins.forEach((pin) => pin.remove());
+  const wasLoading = state.replayLoading;
+  // A trip still loading is abandoned: its result is ignored when it lands.
+  state.replayToken = (state.replayToken ?? 0) + 1;
+  state.replayLoading = false;
+  if (!r && !wasLoading && !$('replay').classList.contains('replaying')) return;
+  if (r) {
+    cancelAnimationFrame(r.frame);
+    r.marker?.remove();
+    r.pins.forEach((pin) => pin.remove());
+    drawTrack([]);
+  }
   state.replay = null;
   const bar = $('replay');
   bar.hidden = true;
+  bar.classList.remove('replaying');
   clear(bar);
-  drawTrack([]);
+  renderDetail();
+}
+
+/** A one-line message in the replay bar that can always be dismissed. */
+function replayMessage(bar, text, className = 'muted') {
+  clear(bar);
+  bar.appendChild(el('span', { className: `${className} replay-note`, text }));
+  const close = el('button', { className: 'icon-btn', text: '✕', title: 'Close replay' });
+  close.addEventListener('click', stopReplay);
+  bar.appendChild(close);
 }
 
 function renderReplayFrame() {
@@ -1411,10 +1723,13 @@ async function startReplay(vehicleId, trip) {
   if (state.draft) stopDrawing();
   stopReplay();
   closeDrawer();
+  const token = state.replayToken;
+  state.replayLoading = true;
+  renderDetail();
   const bar = $('replay');
   bar.hidden = false;
-  clear(bar);
-  bar.appendChild(el('span', { className: 'muted', text: 'Loading trip…' }));
+  bar.classList.add('replaying');
+  replayMessage(bar, 'Loading trip…');
 
   let points;
   let violations;
@@ -1433,16 +1748,18 @@ async function startReplay(vehicleId, trip) {
         }),
     ]);
   } catch (e) {
-    clear(bar);
-    bar.appendChild(el('span', { className: 'error', text: e.message }));
+    if (token !== state.replayToken) return;
+    replayMessage(bar, e.message, 'error');
     return;
   }
+  // Closed, or another trip chosen, while this one was loading.
+  if (token !== state.replayToken) return;
 
   if (points.length < 2) {
-    clear(bar);
-    bar.appendChild(el('span', { className: 'muted', text: 'Not enough recorded points to replay.' }));
+    replayMessage(bar, 'Not enough recorded points to replay.');
     return;
   }
+  state.replayLoading = false;
 
   drawTrack(points);
 
@@ -1466,7 +1783,7 @@ async function startReplay(vehicleId, trip) {
   slider.value = '0';
   const clock = el('span', { className: 'replay-clock' });
   const speed = el('span', { className: 'replay-speed' });
-  const rate = el('select', { className: 'field-sm' });
+  const rate = el('select', { className: 'field-sm replay-rate', title: 'Playback speed' });
   REPLAY_RATES.forEach((n) => {
     const option = el('option', { text: `${n}×` });
     option.value = String(n);
@@ -1519,6 +1836,7 @@ async function startReplay(vehicleId, trip) {
   );
 
   renderReplayFrame();
+  renderDetail();
   setPlaying(true);
 }
 
@@ -1593,8 +1911,8 @@ async function toggleHeatmap() {
   });
   button.classList.add('accent');
   logEvent(
-    'violation',
-    'Speeding map',
+    'info',
+    'Speeding map on',
     `${data?.length ?? 0} rule break${data?.length === 1 ? '' : 's'} in the last ${HEATMAP_DAYS} days`,
   );
 }
@@ -1818,6 +2136,7 @@ function stopDrawing() {
   const bar = $('replay');
   bar.hidden = true;
   clear(bar);
+  renderDetail();
 }
 
 /** The bar along the bottom of the map while a zone is being drawn. */
@@ -1858,15 +2177,21 @@ function startDrawing() {
   state.map.getCanvas().style.cursor = 'crosshair';
   state.map.on('click', onDraftClick);
   renderDraftBar();
+  renderDetail();
 }
 
-/** Name the zone, say what kind it is, and what a driver should be told. */
-function describeDraft(points) {
-  drawerShell('New zone');
+/**
+ * Name the zone, say what kind it is, and what a driver should be told.
+ * With `zone`, edits that zone's details instead; its outline stays as drawn.
+ */
+function describeDraft(points, zone = null) {
+  drawerShell(zone ? 'Edit zone' : 'New zone');
+  const startKind = zone?.kind ?? 'SCHOOL';
 
   const name = el('input', { className: 'field' });
   name.placeholder = 'e.g. St Mary’s School';
   name.maxLength = 80;
+  name.value = zone?.name ?? '';
 
   const kind = el('select', { className: 'field' });
   Object.entries(ZONE_KINDS).forEach(([value, k]) => {
@@ -1874,27 +2199,34 @@ function describeDraft(points) {
     option.value = value;
     kind.appendChild(option);
   });
+  kind.value = startKind;
 
   const message = el('textarea', { className: 'field' });
   message.rows = 3;
   message.maxLength = 200;
-  message.value = ZONE_KINDS.SCHOOL.message;
+  message.value = zone ? zone.alert_message ?? '' : ZONE_KINDS[startKind].message;
 
   const limit = el('input', { className: 'field' });
   limit.type = 'number';
   limit.min = '5';
   limit.max = '200';
   limit.placeholder = 'No special limit';
-  limit.value = String(ZONE_KINDS.SCHOOL.limit);
+  limit.value = zone ? String(zone.speed_limit_kmh ?? '') : String(ZONE_KINDS[startKind].limit ?? '');
 
+  // Changing the kind fills in its suggestions, but never over something the
+  // operator wrote themselves.
+  let previousKind = startKind;
   kind.addEventListener('change', () => {
-    message.value = ZONE_KINDS[kind.value].message;
-    limit.value = ZONE_KINDS[kind.value].limit ?? '';
+    const was = ZONE_KINDS[previousKind];
+    const next = ZONE_KINDS[kind.value];
+    if (!message.value.trim() || message.value === was.message) message.value = next.message;
+    if (!limit.value.trim() || limit.value === String(was.limit ?? '')) limit.value = next.limit ?? '';
+    previousKind = kind.value;
   });
 
   const status = el('small', { className: 'error' });
   status.hidden = true;
-  const save = el('button', { className: 'btn accent', text: 'Save zone' });
+  const save = el('button', { className: 'btn accent', text: zone ? 'Save changes' : 'Save zone' });
 
   save.addEventListener('click', async () => {
     if (!name.value.trim()) {
@@ -1909,21 +2241,23 @@ function describeDraft(points) {
       return;
     }
     save.disabled = true;
-    const { error } = await supabase.from('zones').insert({
+    const fields = {
       name: name.value.trim(),
       kind: kind.value,
-      polygon: points,
       alert_message: message.value.trim() || null,
       speed_limit_kmh: limitKmh,
-    });
+    };
+    const { error } = zone
+      ? await supabase.from('zones').update(fields).eq('id', zone.id)
+      : await supabase.from('zones').insert({ ...fields, polygon: points });
     if (error) {
       status.textContent = error.message;
       status.hidden = false;
       save.disabled = false;
       return;
     }
-    stopDrawing();
-    logEvent('alert', 'Zone saved', name.value.trim());
+    if (!zone) stopDrawing();
+    logEvent('info', zone ? 'Zone updated' : 'Zone saved', fields.name);
     await loadZones();
     openZones();
   });
@@ -1943,7 +2277,29 @@ function describeDraft(points) {
     }),
   );
   drawer.appendChild(status);
-  drawer.appendChild(save);
+  if (zone) {
+    const back = el('button', { className: 'btn', text: 'Back to zones' });
+    back.addEventListener('click', openZones);
+    drawer.appendChild(el('div', { className: 'admin-actions' }, [back, save]));
+  } else {
+    drawer.appendChild(save);
+  }
+}
+
+/** Fly to a zone, leaving room for the drawer beside it on a wide screen. */
+function focusZone(z) {
+  if (!state.map || !z.polygon?.length) return;
+  const [lat0, lng0] = z.polygon[0];
+  const bounds = z.polygon.reduce(
+    (b, [lat, lng]) => b.extend([lng, lat]),
+    new maplibregl.LngLatBounds([lng0, lat0], [lng0, lat0]),
+  );
+  const wide = window.innerWidth > 900;
+  state.map.fitBounds(bounds, {
+    padding: { top: 90, bottom: 90, left: 70, right: wide && !drawer.hidden ? 430 : 70 },
+    maxZoom: 17,
+    duration: 800,
+  });
 }
 
 function openZones() {
@@ -1966,7 +2322,12 @@ function openZones() {
 
   const list = el('div', { className: 'admin-list' });
   state.zones.forEach((z) => {
-    const row = el('div', { className: 'admin-row' });
+    const row = el('div', { className: 'admin-row zone-row', title: 'Show on the map' });
+    // Anywhere on the row but its buttons flies to the zone.
+    row.addEventListener('click', (event) => {
+      if (event.target.closest('button')) return;
+      focusZone(z);
+    });
     row.appendChild(
       el('div', { className: 'admin-head' }, [
         el('strong', { text: z.name }),
@@ -1984,15 +2345,34 @@ function openZones() {
       await loadZones();
       openZones();
     });
+    const edit = el('button', { className: 'btn', text: 'Edit' });
+    edit.addEventListener('click', () => describeDraft(z.polygon, z));
+
+    // Deleting takes a second, deliberate press: one stray click used to
+    // remove a zone and its history of entries for good.
     const remove = el('button', { className: 'btn', text: 'Delete' });
+    let armed = null;
     remove.addEventListener('click', async () => {
+      if (!armed) {
+        remove.textContent = 'Press again to delete';
+        remove.classList.add('danger');
+        armed = setTimeout(() => {
+          armed = null;
+          remove.textContent = 'Delete';
+          remove.classList.remove('danger');
+        }, 4000);
+        return;
+      }
+      clearTimeout(armed);
       remove.disabled = true;
+      remove.textContent = 'Deleting…';
       const { error } = await supabase.from('zones').delete().eq('id', z.id);
       if (error) logEvent('violation', 'Could not delete zone', error.message);
+      else logEvent('info', 'Zone deleted', z.name);
       await loadZones();
       openZones();
     });
-    row.appendChild(el('div', { className: 'admin-actions' }, [toggle, remove]));
+    row.appendChild(el('div', { className: 'admin-actions' }, [toggle, edit, remove]));
     list.appendChild(row);
   });
   drawer.appendChild(list);
@@ -2025,6 +2405,7 @@ async function startConsole() {
   loadCorridors();
   loadZones();
   loadRecentEvents();
+  loadRecentAlerts();
   subscribeToFleet();
 
   // Realtime is the fast path, not the only one. A laptop that slept, a tunnel,
@@ -2046,9 +2427,12 @@ async function startConsole() {
   // A vehicle that stops streaming leaves its last row behind, so staleness is
   // re-rendered on a timer rather than waiting for an event that never arrives.
   setInterval(() => {
+    state.fleet.forEach(noteLiveness);
     renderFleet();
     state.fleet.forEach(refreshMarker);
+    // In place: only the figures that changed are touched.
     if (state.selectedId) renderDetail();
+    state.drawerRefresh?.();
   }, 5_000);
 }
 
@@ -2081,6 +2465,7 @@ async function reconcile() {
   });
 
   state.lastReconcileAt = Date.now();
+  state.liveReady = true;
   renderFleet();
   renderDetail();
   loadViolationCount();
@@ -2136,13 +2521,20 @@ function subscribeToFleet() {
       // Logged from the events table instead, which records every kind.
     })
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'alerts' }, (payload) => {
-      const entry = payload.new.vehicle_id ? state.fleet.get(payload.new.vehicle_id) : null;
+      const alert = payload.new;
+      trackAlert(alert);
+      const entry = alert.vehicle_id ? state.fleet.get(alert.vehicle_id) : null;
+      const label = alert.category.charAt(0) + alert.category.slice(1).toLowerCase();
       logEvent(
         'alert',
-        `${payload.new.category} alert`,
-        `${entry ? plate(entry) : 'Fleet'} — ${payload.new.message}`,
+        `${label} alert${alert.created_by ? '' : ' · automatic'}`,
+        `${entry ? plate(entry) : 'Whole fleet'} — ${alert.message}`,
       );
+      refreshDelivery();
     })
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'alert_receipts' }, (payload) =>
+      onReceipt(payload.new),
+    )
     .on('postgres_changes', { event: '*', schema: 'public', table: 'corridors' }, onCorridorChange)
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'corridor_signals' }, onSignalChange)
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'corridor_warnings' }, onWarning)

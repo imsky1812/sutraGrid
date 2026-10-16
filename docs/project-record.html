@@ -306,7 +306,7 @@
       <div class="links">
         <div><span>Operator console</span><a href="https://sutra-control.expo.app">sutra-control.expo.app</a></div>
         <div><span>Source</span><a href="https://github.com/imsky1812/sutraGrid">github.com/imsky1812/sutraGrid</a></div>
-        <div><span>Latest APK</span><code>sutra-vehicle-oct16.apk</code><br><small class="mono">EAS build 03b8dfac · 16 Oct 2026</small></div>
+        <div><span>Latest APK</span><a href="https://expo.dev/artifacts/eas/1OW_FrDJvRiWY6TGYWWFQR9L5zBvHkMR8T6gCHuKvfU.apk">sutra-vehicle-oct16-adaptive.apk</a><br><small class="mono">EAS build 7ff1befc · 16 Oct 2026 · link expires 30 Oct</small></div>
         <div><span>Supabase project</span><code>ytqpjxpzhgintwpbujcy</code></div>
         <div><span>EAS project</span><code>@imsky1812s-org/sutra-vehicle</code></div>
         <div><span>Edge Functions</span><code>directions · geocode · corridor · nearby · notify · signal-dispatch</code></div>
@@ -333,8 +333,8 @@ flowchart LR
           <tbody>
             <tr><td>Driver app</td><td>Expo / React Native, MapLibre map, background location, notifications</td><td>Android APK built on EAS</td></tr>
             <tr><td>Operator console</td><td>Plain HTML/JS with MapLibre GL and Supabase JS</td><td>EAS Hosting</td></tr>
-            <tr><td>Database</td><td>10 migrations: tables, RLS, triggers, retention, pg_cron</td><td>Supabase</td></tr>
-            <tr><td>Edge Functions</td><td><code>directions</code> (OSRM), <code>geocode</code> (Nominatim), <code>corridor</code> and <code>nearby</code> (OSRM + Overpass)</td><td>Supabase, JWT required</td></tr>
+            <tr><td>Database</td><td>24 migrations: tables, RLS, triggers, retention, pg_cron, Realtime publications</td><td>Supabase</td></tr>
+            <tr><td>Edge Functions</td><td><code>directions</code> (OSRM), <code>geocode</code> (Nominatim), <code>corridor</code> and <code>nearby</code> (OSRM + Overpass), <code>notify</code> (Expo push), <code>signal-dispatch</code> (off until a city connects a controller)</td><td>Supabase</td></tr>
             <tr><td>Fleet simulator</td><td>Vehicles that report like phones, for demonstrating without one device each</td><td><code>tools/</code>, run on a laptop</td></tr>
           </tbody>
         </table>
@@ -365,6 +365,7 @@ flowchart LR
         <li><time>16 Oct</time><div><b>The signal-adapter interface</b><p>Every junction change on a green corridor is now logged as the request SUTRA would send a city's signal controller, shown in the console. A written contract (<code>docs/signal-adapter.md</code>), a dispatch function that stays off until an authority connects a controller, and a reference city-side adapter, tested against each other. Building it found that a corridor whose phone died was never ended; a job now ends those after two minutes of silence.</p></div></li>
         <li><time>16 Oct</time><div><b>No gaps from dead zones</b><p>Positions recorded while a phone has no signal are now kept and sent once it reconnects, into the vehicle's history only, so trips and replay have no holes and nothing live is disturbed by old data.</p></div></li>
         <li><time>16 Oct</time><div><b>Reporting rate follows speed</b><p>Normal vehicles used to report every 3 seconds regardless, which at 60 km/h is 50 m between fixes and blunted collision and zone checks. They now report every second while moving, every 3 s in slow traffic and every 10 s when parked, and the GPS itself slows down once a vehicle has been parked for half a minute. One second is the floor: a phone's GPS produces about one fix a second.</p></div></li>
+        <li><time>16 Oct</time><div><b>Console: thirteen fixes and a new finish</b><p>From a walk-through of the live console. Operators can now see an alert land: the app's receipts stream to the console, which shows "received in the app" against each alert and on the vehicle's card, and warns before sending to a vehicle that is offline. The log no longer announces every vehicle as "online" on load, only real changes either way. An offline vehicle no longer shows its last speed as current, and "last seen" carries a date. The vehicle card updates in place instead of being rebuilt every five seconds; replay is one tidy row with the card out of its way; the drawer opens below the map tools; overlapping map labels give way to the more important vehicle; zones can be edited, take two presses to delete and fly into view when clicked. The look was refined throughout: the intended typeface (which had never actually been loaded), glass panels over the map, quiet motion that respects reduced-motion settings, and a phone layout that no longer runs off the side of the screen.</p></div></li>
         <li><time>22 Sep</time><div><b>Alerts, green corridor, layout</b><p>Beeping alerts and automatic overspeed warnings. The green corridor end to end. Internal database functions locked down. Keyboard and screen-edge alignment fixed across the app. This record added to the repository as <code>docs/project-record.html</code>, kept up to date with every change.</p></div></li>
       </ol>
     </section>
@@ -378,18 +379,18 @@ flowchart LR
         <li>Map follows the driver. Search places, or long-press the map to set a destination; fastest route drawn.</li>
         <li>One tap routes to the nearest hospital, fire station or police station, found around the driver in OpenStreetMap. Without a location fix the app refuses rather than guessing an origin.</li>
         <li><b>Around me:</b> a radar of nearby SUTRA vehicles, emergency ones in green and vehicles being told to give way ringed. Positions are interpolated between updates so the view moves rather than jumps. It states on screen that it sees only SUTRA vehicles, never other traffic or pedestrians.</li>
-        <li>Alerts beep, vibrate and show a notification with no tap needed - and, once Firebase is configured, arrive as a push even when the app is closed. A phone that is open and also gets the push shows one notification, not two.</li>
+        <li>Alerts beep, vibrate and show a notification with no tap needed, and arrive as a push even when the app is closed (Firebase configured 16 October; still to be confirmed on a phone). A phone that is open and also gets the push shows one notification, not two.</li>
         <li>Trips and history: the driver's own last week - trips, distance, time driving, rule breaks.</li>
         <li>Crashes are captured and shown on the next launch.</li>
       </ul>
       <h3>Operator console</h3>
       <ul>
         <li>One interface for operators and drivers. Operators see the whole fleet; drivers see only their own vehicles. The database enforces this, not the browser.</li>
-        <li>Live map and list with speed, plate, offline status; filters and sorting. Recovers on its own from a dropped connection, and re-reads positions every 15 seconds so a silently dead stream costs seconds rather than a reload.</li>
+        <li>Live map and list with speed, plate, offline status; filters and sorting. An offline vehicle shows how long ago it was last seen, with a date once it is not today, and never its last speed as if current. Where labels would overlap, the selected, emergency or speeding vehicle keeps its label. Recovers on its own from a dropped connection, and re-reads positions every 15 seconds so a silently dead stream costs seconds rather than a reload.</li>
         <li>A week of trips per vehicle, each replayable on the map at 1×, 10× or 60× with violations pinned where they happened, plus a heatmap of where speeding happens across the fleet.</li>
-        <li>Send alerts to one vehicle or broadcast to all, with category and severity.</li>
+        <li>Send alerts to one vehicle or broadcast to all, with category and severity. Before sending, the composer says whether the vehicle is live or offline; after, it shows live which apps have received each alert. A missing receipt reads "not yet seen in the app", never "failed", because a push to a closed app leaves none.</li>
         <li>Active green corridors with junction states and drivers warned.</li>
-        <li><b>Zones:</b> draw school, hospital, restricted or depot areas on the map, each with an optional speed limit. Crossings are recorded, and a zone can send drivers a message on entry.</li>
+        <li><b>Zones:</b> draw school, hospital, restricted or depot areas on the map, each with an optional speed limit. Crossings are recorded, and a zone can send drivers a message on entry. Click a zone to fly to it; edit its name, kind, limit and message; deleting takes a second press.</li>
         <li><b>Signal requests:</b> beside each green corridor, what SUTRA asked (or in simulation would ask) the city's signal controller, and the answer.</li>
         <li><b>Live event log</b> fed from one events table: zone crossings, speeding, harsh braking, wrong way, collision warnings, corridors.</li>
         <li><b>Vehicles screen:</b> grant or revoke emergency authorization and set the vehicle type for any registered vehicle. Operators only; every change is recorded against the operator who made it.</li>
@@ -452,7 +453,7 @@ flowchart LR
             <tr><td><code>vehicle_positions</code></td><td>Live position, one row per vehicle, upserted</td></tr>
             <tr><td><code>position_history</code></td><td>Append-only track, written by trigger</td></tr>
             <tr><td><code>violations</code></td><td>Speeding episodes, harsh braking and wrong-way driving: where, when, and the detail of each</td></tr>
-            <tr><td><code>alerts</code>, <code>alert_receipts</code></td><td>Operator and system alerts, and acknowledgements</td></tr>
+            <tr><td><code>alerts</code>, <code>alert_receipts</code></td><td>Operator and system alerts, and the moment each reached an open app (streamed live to the console)</td></tr>
             <tr><td><code>corridors</code> and 3 child tables</td><td>Route points, simulated junction states, drivers warned</td></tr>
             <tr><td><code>operators</code>, <code>operator_invites</code></td><td>Who may watch the whole fleet</td></tr>
             <tr><td><code>emergency_grants</code></td><td>Who granted emergency authorization, to which vehicle, when</td></tr>
@@ -477,7 +478,7 @@ flowchart LR
           <thead><tr><th>Suite</th><th>Count</th><th>Runs on</th></tr></thead>
           <tbody>
             <tr><td>App: screens, alerts, corridor, telemetry</td><td class="num">214 passing</td><td>Jest</td></tr>
-            <tr><td>Database rules and triggers, Edge Function handlers</td><td class="num">382 passing</td><td>PGlite (Postgres in WASM), no Docker</td></tr>
+            <tr><td>Database rules and triggers, Edge Function handlers, console helpers</td><td class="num">393 passing</td><td>PGlite (Postgres in WASM), no Docker</td></tr>
           </tbody>
         </table>
       </div>
@@ -501,7 +502,7 @@ flowchart LR
     <section id="limits">
       <h2>Known limits</h2>
       <ul>
-        <li>Push to a closed app is built and verified up to the push service, but needs a Firebase project before a phone can receive one. Expo's delivery receipts are not yet checked.</li>
+        <li>Push to a closed app is built, Firebase is configured and the latest APK carries it, but a notification on a closed phone has not yet been seen. Expo's delivery receipts are not checked, and the app writes a receipt only when an alert reaches it open, so the console cannot confirm a push to a closed app; it says "not yet seen in the app" rather than guessing.</li>
         <li>“Fastest” route uses speed limits, not live traffic; live traffic needs the authority’s feed or a paid provider.</li>
         <li>Only drivers running SUTRA get corridor warnings.</li>
         <li>The public OSRM, Nominatim and Overpass servers have no uptime guarantee. The junction lookup is often refused or rate-limited, so it retries from the phone; a corridor still starts without junctions if both fail.</li>
@@ -514,7 +515,7 @@ flowchart LR
     <section id="next">
       <h2>Open actions</h2>
       <ul class="todo">
-        <li>Install <code>sutra-vehicle-oct16.apk</code> on both phones and check: the beep on a new alert, the Around me radar with the other phone nearby, and Trips and history.</li>
+        <li>Install <code>sutra-vehicle-oct16-adaptive.apk</code> (also linked from the console's Insights) on both phones and check: the beep on a new alert, the Around me radar with the other phone nearby, Trips and history, and that the console shows the alert as received.</li>
         <li>To try a corridor, open <b>Vehicles</b> in the console, set the type to AMBULANCE and press <b>Authorize</b>, then start a shift in that vehicle. Seeing a driver get warned needs a second phone on the route.</li>
         <li><b>Import roads</b> for any further area you operate in (the test phones' area is done): <code>node import-roads.mjs --near lat,lng --radius 3000</code> from <code>tools/</code>. See <code>tools/README.md</code>.</li>
         <li><b>Test push:</b> install the latest APK on both phones and start a shift on each, then swipe SUTRA away on one and send it an alert from the console. It should still beep.</li>
@@ -531,6 +532,7 @@ flowchart LR
         <li><b>Background tasks.</b> A throw in the background location task kills the app, and a foreground service without notification permission is killed by Android.</li>
         <li><b>Overpass and Nominatim from a data centre.</b> Both refuse generic user agents (including okhttp, which React Native sends), so always send a real User-Agent and <code>Accept: application/json</code>. Even then, the same query that returns 200 from an ordinary network was answered 406, 500 and 403 when it came from the Edge runtime, so anything that depends on them also needs a retry from the phone.</li>
         <li><b>Public functions.</b> Every function in the public schema is a REST endpoint; SECURITY DEFINER helpers need an explicit revoke.</li>
+        <li><b>A grid column of <code>1fr</code> is not "the screen's width".</b> It grows to its widest child, which pushed the console off the side of a phone; <code>minmax(0, 1fr)</code> holds it. And a font named in CSS is not a font loaded: the console's typeface had never been fetched.</li>
       </ul>
     </section>
   </main>

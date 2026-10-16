@@ -878,6 +878,52 @@
   </p>
 </div>
 
+<div class="phase">
+  <div class="phase-head">
+    <span class="phase-no">16 OCT</span>
+    <h3>Console walk-through: thirteen fixes</h3>
+    <span class="tag bug">Bugs</span>
+    <span class="tag done">Fixed</span>
+  </div>
+  <p>
+    A walk-through of the live console in a browser found thirteen problems,
+    all fixed, with the look refined at the same time.
+  </p>
+  <ul>
+    <li><strong>No delivery status for alerts.</strong> The app had always
+      written a receipt when an alert reached it, but the table was never
+      published, so the operator could not see it. Migration&nbsp;24 publishes
+      it; the composer, the vehicle card and the log show it live. A missing
+      receipt reads "not yet seen in the app", not "failed" — a push to a
+      closed app leaves none.</li>
+    <li><strong>"Vehicle online" for every vehicle on load,</strong> including
+      ones silent for days. Now only real changes, online or offline.</li>
+    <li><strong>An offline vehicle showed its last speed as current,</strong>
+      and "last seen" had no date. Now "—" with "last 58 km/h", and a dated,
+      relative time.</li>
+    <li><strong>The vehicle card was rebuilt every five seconds,</strong>
+      flickering and dropping a hovered button. It is built once and updated
+      in place.</li>
+    <li><strong>Replay controls wrapped into each other</strong> and the card
+      sat on top of them; replay is now one fixed row and the card steps
+      aside. A trip closed while loading no longer starts anyway.</li>
+    <li><strong>Zones:</strong> deleting took one stray click and could not
+      be edited; now a second press is needed, details can be edited, and a
+      zone flies into view when clicked.</li>
+    <li><strong>Layout:</strong> the drawer covered the map tools, map labels
+      piled on top of each other, the speeding map was logged as a violation,
+      the composer did not warn about an offline recipient, and on a phone the
+      tool row did not fit and the whole console ran off the side.</li>
+  </ul>
+  <p>
+    The typeface the console was designed in had never actually been loaded;
+    it is now, with glass panels over the map, quiet motion that respects a
+    reduced-motion setting, one focus ring for keyboard use, and tested phone
+    layouts. 11 new tests: delivery wording, dated times, label collision, and
+    who may read receipts.
+  </p>
+</div>
+
 <h2>What is deliberately not here</h2>
 <p>
   The source document is clear about the limits of the approach, and they belong
