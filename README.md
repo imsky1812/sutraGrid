@@ -322,7 +322,7 @@ npm run apk              # gradlew assembleDebug with ninja parallelism capped
 
 ```bash
 cd mobile         && npm test && npm run typecheck   # 214 tests
-cd supabase/tests && npm install && npm test         # 409 tests
+cd supabase/tests && npm install && npm test         # 413 tests
 ```
 
 Schema and RLS tests run against **PGlite** — Postgres compiled to WASM, in
@@ -580,6 +580,11 @@ Things that cost real time here and are worth knowing:
   Overpass server was down at once, so `nearby` (the Nearest hospital, fire
   and police buttons) also asks Photon first, by category
   (`include=osm.amenity.hospital`) inside a box, and sorts by distance.
+  OpenStreetMap's coverage of Indian cities is thin, though - no police or fire
+  station within 3 km of a phone where Google showed both within 2 - so
+  `nearby` uses Google Places first when the server secret
+  `GOOGLE_PLACES_KEY` is set (Dashboard → Edge Functions → Secrets), and
+  falls back to the free sources without it.
 - **Android fixes a notification channel's sound on first creation.** Changing
   the beep means a new channel id (`sutra-alerts-v1` → `-v2`).
 - **Functions in `public` are REST endpoints.** Postgres grants EXECUTE to

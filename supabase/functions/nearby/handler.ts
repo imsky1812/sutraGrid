@@ -15,6 +15,13 @@
 // answers when it is up. Nominatim is the last resort: a text search, so it
 // can only be biased toward a box, never sorted by distance.
 //
+// Google Places goes ahead of all of them when a key is configured. On the
+// same day a driver in Ghaziabad found Google showing a police station and
+// hospitals within 1-2 km, while OpenStreetMap had no police or fire station
+// within 3 km at all: its coverage of Indian cities is far thinner. The key is
+// a server secret (GOOGLE_PLACES_KEY), never in the app; without it this
+// function behaves exactly as before.
+//
 // Like the other functions, this file has no Deno globals so it can be unit
 // tested under Node; index.ts is the wiring.
 
@@ -30,7 +37,11 @@ export type Place = {
 export type Deps = {
   /** Tried in order; the public servers are often busy. */
   overpassUrls: string[];
-  /** Photon-compatible geocoder, tried first. Without one, Overpass first. */
+  /** Google Places API key, tried first when set. */
+  googleKey?: string;
+  /** Overridable for tests. */
+  googleUrl?: string;
+  /** Photon-compatible geocoder, tried next. Without one, Overpass next. */
   photonUrl?: string;
   geocoderUrl: string;
   userAgent: string;
@@ -43,6 +54,7 @@ export const DEFAULT_OVERPASS = [
 ];
 export const DEFAULT_GEOCODER = 'https://nominatim.openstreetmap.org';
 export const DEFAULT_PHOTON = 'https://photon.komoot.io';
+export const DEFAULT_GOOGLE = 'https://places.googleapis.com/v1/places:searchNearby';
 export const DEFAULT_USER_AGENT = 'SUTRA-traffic/1.0 (emergency service finder)';
 
 /** Per server. A driver is waiting on this, so give up quickly. */
@@ -50,9 +62,9 @@ const TIMEOUT_MS = 12_000;
 
 /** What each chip means in OpenStreetMap, and what to call an unnamed one. */
 export const KINDS = {
-  hospital: { tag: 'amenity=hospital', category: 'osm.amenity.hospital', label: 'Hospital' },
-  fire: { tag: 'amenity=fire_station', category: 'osm.amenity.fire_station', label: 'Fire station' },
-  police: { tag: 'amenity=police', category: 'osm.amenity.police', label: 'Police station' },
+  hospital: { tag: 'amenity=hospital', category: 'osm.amenity.hospital', google: 'hospital', label: 'Hospital' },
+  fire: { tag: 'amenity=fire_station', category: 'osm.amenity.fire_station', google: 'fire_station', label: 'Fire station' },
+  police: { tag: 'amenity=police', category: 'osm.amenity.police', google: 'police', label: 'Police station' },
 } as const;
 
 export type Kind = keyof typeof KINDS;
@@ -131,6 +143,72 @@ export function bboxAround(near: LatLng, radius: number): string {
   return [near.longitude - dLng, near.latitude - dLat, near.longitude + dLng, near.latitude + dLat]
     .map((v) => v.toFixed(5))
     .join(',');
+}
+
+type GooglePlace = {
+  displayName?: { text?: string };
+  location?: { latitude?: number; longitude?: number };
+};
+
+/**
+ * Google Places Nearby Search, ranked by distance, widening like the others.
+ * Asks only for name and location, which keeps each call in the cheapest
+ * billing tier that can answer it. Null when Google could not be used.
+ */
+async function findViaGoogle(kind: Kind, near: LatLng, deps: Deps): Promise<Place[] | null> {
+  if (!deps.googleKey) return null;
+  const origin: Point = [near.latitude, near.longitude];
+  let reached = false;
+
+  for (const radius of RADII_M) {
+    try {
+      const response = await deps.fetchImpl(deps.googleUrl ?? DEFAULT_GOOGLE, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': deps.googleKey,
+          'X-Goog-FieldMask': 'places.displayName,places.location',
+        },
+        body: JSON.stringify({
+          includedTypes: [KINDS[kind].google],
+          maxResultCount: 20,
+          rankPreference: 'DISTANCE',
+          locationRestriction: {
+            circle: { center: { latitude: near.latitude, longitude: near.longitude }, radius },
+          },
+        }),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        // A bad key, billing switched off or a quota: say so in the logs, and
+        // let the free sources answer.
+        console.error('[nearby] google status', response.status, await response.text().catch(() => ''));
+        return reached ? [] : null;
+      }
+      const data = (await response.json()) as { places?: GooglePlace[] };
+      reached = true;
+      const places = nearest(
+        (data.places ?? [])
+          .map((p) => {
+            const lat = p.location?.latitude;
+            const lng = p.location?.longitude;
+            if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+            return {
+              name: p.displayName?.text || KINDS[kind].label,
+              latitude: lat,
+              longitude: lng,
+              distanceMeters: distanceM(origin, [lat, lng]),
+            };
+          })
+          .filter((p): p is Place => p !== null),
+      );
+      if (places.length > 0) return places;
+    } catch (e) {
+      console.error('[nearby] google failed:', (e as Error)?.message ?? e);
+      return reached ? [] : null;
+    }
+  }
+  return reached ? [] : null;
 }
 
 /** Per box. Photon returns its own ranking, not distance, so ask for plenty and sort. */
@@ -318,6 +396,11 @@ export async function handler(req: Request, deps: Deps): Promise<Response> {
   const kind = body.kind as Kind;
   const near = body.near;
 
+  const viaGoogle = await findViaGoogle(kind, near, deps);
+  if (viaGoogle && viaGoogle.length > 0) {
+    return json({ places: viaGoogle, source: 'google' }, 200);
+  }
+
   const viaPhoton = await findViaPhoton(kind, near, deps);
   if (viaPhoton && viaPhoton.length > 0) {
     return json({ places: viaPhoton, source: 'photon' }, 200);
@@ -338,6 +421,7 @@ export async function handler(req: Request, deps: Deps): Promise<Response> {
   // is no such service mapped near this driver.
   if (viaOverpass) return json({ places: [], source: 'overpass' }, 200);
   if (viaPhoton) return json({ places: [], source: 'photon' }, 200);
+  if (viaGoogle) return json({ places: [], source: 'google' }, 200);
 
   return json({ error: `Could not look up the nearest ${KINDS[kind].label.toLowerCase()}.` }, 502);
 }

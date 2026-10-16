@@ -961,6 +961,25 @@
   </p>
 </div>
 
+<div class="phase">
+  <div class="phase-head">
+    <span class="phase-no">16 OCT</span>
+    <h3>Nearest results further than Google's</h3>
+    <span class="tag med">Needs a key</span>
+  </div>
+  <p>
+    Google Maps showed a hospital and a police station within 1–2 km; the app's
+    were further. Checked from the phone's own position: OpenStreetMap has no
+    police or fire station within 3 km of it at all, so this is coverage, not
+    search, and no free OpenStreetMap service can fix it. <code>nearby</code>
+    now asks Google Places Nearby Search first, ranked by distance and asking
+    only for name and location, whenever the server secret
+    <code>GOOGLE_PLACES_KEY</code> is set; a missing, refused or exhausted key
+    falls back to the free sources. Deployed; switches on when a key is added.
+    4 tests.
+  </p>
+</div>
+
 <h2>What is deliberately not here</h2>
 <p>
   The source document is clear about the limits of the approach, and they belong

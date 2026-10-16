@@ -297,3 +297,64 @@ test('the box is centred on the driver and grows with the radius', () => {
   assert.ok(wide[3] - wide[1] > n - s);
   assert.match(DEFAULT_PHOTON, /^https:\/\//);
 });
+
+// --- Google Places, when a key is configured ------------------------------------
+//
+// OpenStreetMap had no police or fire station within 3 km of a driver in
+// Ghaziabad that Google Maps showed within 1-2 km.
+
+const withGoogle = (fetchImpl) => ({
+  ...withPhoton(fetchImpl),
+  googleKey: 'test-key',
+  googleUrl: 'https://google.example.com/places:searchNearby',
+});
+const isGoogle = (url) => url.startsWith('https://google.');
+const gplace = (lat, lng, name) => ({ displayName: { text: name }, location: { latitude: lat, longitude: lng } });
+
+test('with a key, asks Google first, by type and ranked by distance', async () => {
+  const calls = [];
+  const res = await handler(post({ kind: 'police', near: DELHI }), withGoogle((url, init) => {
+    calls.push({ url, init });
+    return Promise.resolve(ok({ places: [gplace(DELHI.latitude + 0.009, DELHI.longitude, 'Kotwali Police Station')] }));
+  }));
+  const body = await res.json();
+  assert.equal(body.source, 'google');
+  assert.equal(body.places[0].name, 'Kotwali Police Station');
+  assert.equal(calls.length, 1);
+  const sent = JSON.parse(calls[0].init.body);
+  assert.deepEqual(sent.includedTypes, ['police']);
+  assert.equal(sent.rankPreference, 'DISTANCE');
+  assert.equal(sent.locationRestriction.circle.radius, RADII_M[0]);
+  assert.equal(calls[0].init.headers['X-Goog-Api-Key'], 'test-key');
+  // Name and location only: the cheapest fields that answer the question.
+  assert.equal(calls[0].init.headers['X-Goog-FieldMask'], 'places.displayName,places.location');
+});
+
+test('a refused key falls back to the free sources', async () => {
+  const res = await handler(post({ kind: 'hospital', near: DELHI }), withGoogle((url) =>
+    isGoogle(url)
+      ? Promise.resolve(new Response('{"error":{"status":"PERMISSION_DENIED"}}', { status: 403 }))
+      : Promise.resolve(features([feature(DELHI.latitude + 0.01, DELHI.longitude, 'OSM Hospital')])),
+  ));
+  const body = await res.json();
+  assert.equal(body.source, 'photon');
+  assert.equal(body.places[0].name, 'OSM Hospital');
+});
+
+test('Google widens the circle when nothing is close', async () => {
+  const radii = [];
+  const res = await handler(post({ kind: 'fire', near: DELHI }), withGoogle((url, init) => {
+    radii.push(JSON.parse(init.body).locationRestriction.circle.radius);
+    return Promise.resolve(ok(radii.length < 2 ? {} : { places: [gplace(DELHI.latitude + 0.1, DELHI.longitude, 'Fire Station')] }));
+  }));
+  assert.deepEqual(radii, RADII_M.slice(0, 2));
+  assert.equal((await res.json()).source, 'google');
+});
+
+test('without a key, Google is never called', async () => {
+  const res = await handler(post({ kind: 'hospital', near: DELHI }), withPhoton((url) => {
+    assert.ok(!isGoogle(url));
+    return Promise.resolve(features([feature(DELHI.latitude + 0.01, DELHI.longitude, 'OSM Hospital')]));
+  }));
+  assert.equal((await res.json()).source, 'photon');
+});

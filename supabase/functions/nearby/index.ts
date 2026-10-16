@@ -23,6 +23,9 @@ import {
 
 Deno.serve((req: Request) =>
   handler(req, {
+    // Optional. Set as a Supabase secret, never in the app:
+    //   Dashboard > Edge Functions > Secrets > GOOGLE_PLACES_KEY
+    googleKey: Deno.env.get('GOOGLE_PLACES_KEY') || undefined,
     photonUrl: Deno.env.get('PHOTON_URL') ?? DEFAULT_PHOTON,
     overpassUrls: Deno.env.get('OVERPASS_URLS')?.split(',').map((u) => u.trim()) ?? DEFAULT_OVERPASS,
     geocoderUrl: Deno.env.get('GEOCODER_URL') ?? DEFAULT_GEOCODER,
