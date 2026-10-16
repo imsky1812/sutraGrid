@@ -7,11 +7,12 @@ declare const Deno: {
   serve(handler: (req: Request) => Promise<Response>): void;
 };
 
-import { handler, DEFAULT_GEOCODER, DEFAULT_USER_AGENT } from './handler.ts';
+import { handler, DEFAULT_GEOCODER, DEFAULT_PHOTON, DEFAULT_USER_AGENT } from './handler.ts';
 
 Deno.serve((req: Request) =>
   handler(req, {
     geocoderUrl: Deno.env.get('GEOCODER_URL') ?? DEFAULT_GEOCODER,
+    photonUrl: Deno.env.get('PHOTON_URL') ?? DEFAULT_PHOTON,
     userAgent: Deno.env.get('GEOCODER_USER_AGENT') ?? DEFAULT_USER_AGENT,
     fetchImpl: fetch,
   }),

@@ -334,7 +334,7 @@ flowchart LR
             <tr><td>Driver app</td><td>Expo / React Native, MapLibre map, background location, notifications</td><td>Android APK built on EAS</td></tr>
             <tr><td>Operator console</td><td>Plain HTML/JS with MapLibre GL and Supabase JS</td><td>EAS Hosting</td></tr>
             <tr><td>Database</td><td>24 migrations: tables, RLS, triggers, retention, pg_cron, Realtime publications</td><td>Supabase</td></tr>
-            <tr><td>Edge Functions</td><td><code>directions</code> (OSRM), <code>geocode</code> (Nominatim), <code>corridor</code> and <code>nearby</code> (OSRM + Overpass), <code>notify</code> (Expo push), <code>signal-dispatch</code> (off until a city connects a controller)</td><td>Supabase</td></tr>
+            <tr><td>Edge Functions</td><td><code>directions</code> (OSRM), <code>geocode</code> (Photon, Nominatim as fallback), <code>corridor</code> and <code>nearby</code> (OSRM + Overpass), <code>notify</code> (Expo push), <code>signal-dispatch</code> (off until a city connects a controller)</td><td>Supabase</td></tr>
             <tr><td>Fleet simulator</td><td>Vehicles that report like phones, for demonstrating without one device each</td><td><code>tools/</code>, run on a laptop</td></tr>
           </tbody>
         </table>
@@ -366,6 +366,7 @@ flowchart LR
         <li><time>16 Oct</time><div><b>No gaps from dead zones</b><p>Positions recorded while a phone has no signal are now kept and sent once it reconnects, into the vehicle's history only, so trips and replay have no holes and nothing live is disturbed by old data.</p></div></li>
         <li><time>16 Oct</time><div><b>Reporting rate follows speed</b><p>Normal vehicles used to report every 3 seconds regardless, which at 60 km/h is 50 m between fixes and blunted collision and zone checks. They now report every second while moving, every 3 s in slow traffic and every 10 s when parked, and the GPS itself slows down once a vehicle has been parked for half a minute. One second is the floor: a phone's GPS produces about one fix a second.</p></div></li>
         <li><time>16 Oct</time><div><b>Console: thirteen fixes and a new finish</b><p>From a walk-through of the live console. Operators can now see an alert land: the app's receipts stream to the console, which shows "received in the app" against each alert and on the vehicle's card, and warns before sending to a vehicle that is offline. The log no longer announces every vehicle as "online" on load, only real changes either way. An offline vehicle no longer shows its last speed as current, and "last seen" carries a date. The vehicle card updates in place instead of being rebuilt every five seconds; replay is one tidy row with the card out of its way; the drawer opens below the map tools; overlapping map labels give way to the more important vehicle; zones can be edited, take two presses to delete and fly into view when clicked. The look was refined throughout: the intended typeface (which had never actually been loaded), glass panels over the map, quiet motion that respects reduced-motion settings, and a phone layout that no longer runs off the side of the screen.</p></div></li>
+        <li><time>16 Oct</time><div><b>Place search fixed</b><p>Reported from the phone: searching for a place showed "Edge Function returned a non-2xx status code". OpenStreetMap's Nominatim had started refusing every request from Supabase's servers (403), so every search and every place name for a tapped point failed. Search now asks Photon, another free OpenStreetMap geocoder that accepts them, and keeps Nominatim as a fallback. A server-side change: no new APK needed. Checked live with local searches such as "Ghaziabad railway station" and "ABES Engineering College".</p></div></li>
         <li><time>22 Sep</time><div><b>Alerts, green corridor, layout</b><p>Beeping alerts and automatic overspeed warnings. The green corridor end to end. Internal database functions locked down. Keyboard and screen-edge alignment fixed across the app. This record added to the repository as <code>docs/project-record.html</code>, kept up to date with every change.</p></div></li>
       </ol>
     </section>
@@ -478,7 +479,7 @@ flowchart LR
           <thead><tr><th>Suite</th><th>Count</th><th>Runs on</th></tr></thead>
           <tbody>
             <tr><td>App: screens, alerts, corridor, telemetry</td><td class="num">214 passing</td><td>Jest</td></tr>
-            <tr><td>Database rules and triggers, Edge Function handlers, console helpers</td><td class="num">393 passing</td><td>PGlite (Postgres in WASM), no Docker</td></tr>
+            <tr><td>Database rules and triggers, Edge Function handlers, console helpers</td><td class="num">403 passing</td><td>PGlite (Postgres in WASM), no Docker</td></tr>
           </tbody>
         </table>
       </div>
@@ -503,9 +504,10 @@ flowchart LR
       <h2>Known limits</h2>
       <ul>
         <li>Push to a closed app is built, Firebase is configured and the latest APK carries it, but a notification on a closed phone has not yet been seen. Expo's delivery receipts are not checked, and the app writes a receipt only when an alert reaches it open, so the console cannot confirm a push to a closed app; it says "not yet seen in the app" rather than guessing.</li>
+        <li>Place search matches names, so a bare word like "hospital" finds places called that rather than the nearest hospital; the Nearest hospital, fire station and police buttons are the way to find those. The app also shows the server's generic "non-2xx status code" text when a function fails, rather than its reason; fixing that needs an app rebuild.</li>
         <li>“Fastest” route uses speed limits, not live traffic; live traffic needs the authority’s feed or a paid provider.</li>
         <li>Only drivers running SUTRA get corridor warnings.</li>
-        <li>The public OSRM, Nominatim and Overpass servers have no uptime guarantee. The junction lookup is often refused or rate-limited, so it retries from the phone; a corridor still starts without junctions if both fail.</li>
+        <li>The public OSRM, Photon, Nominatim and Overpass servers have no uptime guarantee; Nominatim already refuses Supabase's servers outright, which is why search goes to Photon first. The junction lookup is often refused or rate-limited, so it retries from the phone; a corridor still starts without junctions if both fail.</li>
         <li>EAS build artifacts expire after 14 days, so a download link older than that returns 404 and the app has to be rebuilt.</li>
         <li>Spatial lookups use plain indexes, which is fine at today's scale (about 6 ms per position update with every check running) but will need PostGIS once roads for a whole city are imported or a few hundred vehicles are active. Deferred deliberately; the trigger is written down in the roadmap.</li>
         <li>No CI: the tests run only when someone runs them. The app suite can also time out when the machine is busy running the database suite at the same time.</li>

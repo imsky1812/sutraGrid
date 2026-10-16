@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { handler, DEFAULT_GEOCODER, DEFAULT_USER_AGENT } from '../functions/geocode/handler.ts';
+import {
+  handler,
+  photonLabel,
+  DEFAULT_GEOCODER,
+  DEFAULT_PHOTON,
+  DEFAULT_USER_AGENT,
+} from '../functions/geocode/handler.ts';
 
 const deps = (fetchImpl) => ({
   geocoderUrl: 'https://geo.example.com',
@@ -132,4 +138,113 @@ test('survives an unreadable upstream response', async () => {
 test('exposes sane defaults', () => {
   assert.match(DEFAULT_GEOCODER, /^https:\/\//);
   assert.ok(DEFAULT_USER_AGENT.length > 0);
+});
+
+// --- Photon first, Nominatim as the fallback ----------------------------------
+//
+// From the Edge runtime Nominatim answers every request with 403, which left
+// the app's place search failing on every query.
+
+const both = (fetchImpl) => ({ ...deps(fetchImpl), photonUrl: 'https://photon.example.com' });
+
+const STATION = {
+  type: 'Feature',
+  properties: { name: 'Ghaziabad Junction', street: 'Railway Road', city: 'Ghaziabad', state: 'Uttar Pradesh' },
+  geometry: { type: 'Point', coordinates: [77.4282, 28.6528] },
+};
+const photon = (features) => Promise.resolve(new Response(JSON.stringify({ type: 'FeatureCollection', features }), { status: 200 }));
+const status = (code) => Promise.resolve(new Response('denied', { status: code }));
+
+test('asks Photon first, and reads its GeoJSON (longitude first)', async () => {
+  const calls = [];
+  const res = await handler(post({ query: 'railway station' }), both((url) => {
+    calls.push(url);
+    return photon([STATION]);
+  }));
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /^https:\/\/photon\.example\.com\/api\//);
+  assert.equal(body.places[0].name, 'Ghaziabad Junction, Railway Road, Ghaziabad, Uttar Pradesh');
+  assert.equal(body.places[0].latitude, 28.6528);
+  assert.equal(body.places[0].longitude, 77.4282);
+});
+
+test('biases Photon toward the driver', async () => {
+  let calledUrl = null;
+  await handler(post({ query: 'hospital', near: { latitude: 28.63, longitude: 77.44 } }), both((url) => {
+    calledUrl = url;
+    return photon([STATION]);
+  }));
+  const params = new URL(calledUrl).searchParams;
+  assert.equal(params.get('lat'), '28.63');
+  assert.equal(params.get('lon'), '77.44');
+});
+
+test('reverse lookups use Photon\'s reverse endpoint', async () => {
+  let calledUrl = null;
+  const res = await handler(post({ reverse: { latitude: 28.63, longitude: 77.44 } }), both((url) => {
+    calledUrl = url;
+    return photon([STATION]);
+  }));
+  assert.match(calledUrl, /photon\.example\.com\/reverse\?/);
+  assert.equal((await res.json()).places.length, 1);
+});
+
+test('falls back to Nominatim when Photon refuses', async () => {
+  const calls = [];
+  const res = await handler(post({ query: 'hospital' }), both((url) => {
+    calls.push(url);
+    return url.includes('photon') ? status(503) : results([HIT])();
+  }));
+  assert.equal(res.status, 200);
+  assert.equal(calls.length, 2);
+  assert.equal((await res.json()).places[0].name, 'City General Hospital, Bengaluru');
+});
+
+test('falls back when Photon cannot be reached at all', async () => {
+  const res = await handler(post({ query: 'hospital' }), both((url) =>
+    url.includes('photon') ? Promise.reject(new Error('down')) : results([HIT])(),
+  ));
+  assert.equal(res.status, 200);
+});
+
+// The bug as it was seen: Nominatim 403 on every call. With Photon working the
+// search succeeds and Nominatim is never asked.
+test('a Nominatim 403 no longer breaks search', async () => {
+  const res = await handler(post({ query: 'hospital' }), both((url) =>
+    url.includes('photon') ? photon([STATION]) : status(403),
+  ));
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).places.length, 1);
+});
+
+test('reports the last error when every provider fails', async () => {
+  const res = await handler(post({ query: 'hospital' }), both(() => status(403)));
+  assert.equal(res.status, 502);
+  assert.match((await res.json()).error, /403/);
+});
+
+// No matches is an answer, not a failure worth a second provider.
+test('an empty Photon answer is returned as is', async () => {
+  let calls = 0;
+  const res = await handler(post({ query: 'zzzzzz' }), both(() => {
+    calls += 1;
+    return photon([]);
+  }));
+  assert.equal(calls, 1);
+  assert.deepEqual((await res.json()).places, []);
+});
+
+test('Photon entries without a name or coordinates are dropped', async () => {
+  const res = await handler(post({ query: 'hospital' }), both(() =>
+    photon([STATION, { properties: {}, geometry: { coordinates: [77, 28] } }, { properties: { name: 'X' } }]),
+  ));
+  assert.equal((await res.json()).places.length, 1);
+});
+
+test('labels skip empty and repeated parts', () => {
+  assert.equal(photonLabel({ name: 'Ghaziabad', city: 'Ghaziabad', state: 'Uttar Pradesh' }), 'Ghaziabad, Uttar Pradesh');
+  assert.equal(photonLabel({ housenumber: '12', street: 'MG Road', city: 'Bengaluru' }), '12 MG Road, Bengaluru');
+  assert.match(DEFAULT_PHOTON, /^https:\/\//);
 });

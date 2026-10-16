@@ -924,6 +924,24 @@
   </p>
 </div>
 
+<div class="phase">
+  <div class="phase-head">
+    <span class="phase-no">16 OCT</span>
+    <h3>Place search failed on every query</h3>
+    <span class="tag bug">Bug</span>
+    <span class="tag done">Fixed</span>
+  </div>
+  <p>
+    Reported from the phone: "Edge Function returned a non-2xx status code"
+    on every place search. Reproduced against the live function: routing was
+    healthy, but Nominatim answered every request from Supabase's servers with
+    403, as Overpass already does, so search and the names of tapped points both
+    failed. The <code>geocode</code> function now asks Photon (also
+    OpenStreetMap, no key) first and falls back to Nominatim; deployed
+    server-side, so no new APK. 10 tests, including the 403 itself.
+  </p>
+</div>
+
 <h2>What is deliberately not here</h2>
 <p>
   The source document is clear about the limits of the approach, and they belong

@@ -231,7 +231,7 @@ row for a vehicle speeding right now is not stale data.
 | Map rendering | MapLibre GL | none |
 | Tiles | OpenFreeMap (OpenStreetMap data) | none |
 | Routing | OSRM | none |
-| Geocoding | Nominatim | none |
+| Geocoding | Photon, Nominatim as fallback | none |
 | Nearest hospital / fire / police | Overpass (OpenStreetMap) | none |
 | Traffic signals | Overpass (OpenStreetMap) | none |
 
@@ -322,7 +322,7 @@ npm run apk              # gradlew assembleDebug with ninja parallelism capped
 
 ```bash
 cd mobile         && npm test && npm run typecheck   # 214 tests
-cd supabase/tests && npm install && npm test         # 393 tests
+cd supabase/tests && npm install && npm test         # 403 tests
 ```
 
 Schema and RLS tests run against **PGlite** — Postgres compiled to WASM, in
@@ -573,7 +573,10 @@ Things that cost real time here and are worth knowing:
   October the same query that returned 200 from an ordinary network was
   answered 406 by Overpass, 500 by its mirror and 403 by Nominatim when it came
   from the Edge runtime, so **every** OpenStreetMap lookup needs that retry,
-  not just the corridor's junctions.
+  not just the corridor's junctions. On 16 October Nominatim went further and
+  refused every request from the Edge runtime with 403, breaking place search,
+  so `geocode` now asks Photon (photon.komoot.io, also OpenStreetMap, no key)
+  first and keeps Nominatim as the fallback.
 - **Android fixes a notification channel's sound on first creation.** Changing
   the beep means a new channel id (`sutra-alerts-v1` → `-v2`).
 - **Functions in `public` are REST endpoints.** Postgres grants EXECUTE to
